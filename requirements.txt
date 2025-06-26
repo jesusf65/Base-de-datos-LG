@@ -6,3 +6,4 @@ python-dotenv
 pydantic-settings
 psycopg2-binary
 httpx
+requests
