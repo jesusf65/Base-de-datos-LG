@@ -1,26 +1,18 @@
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
-import json
+import logging
+
 router = APIRouter()
+# Configurar logger básico
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-@router.post("/webhooks/aircall")
-async def aircall_webhook(request: Request):
+@router.post("/webhook/aircall")
+async def simple_aircall_logger(request: Request):
     try:
-        body = await request.body()
-        print("🔍 Raw body:")
-        print(body.decode("utf-8"))
-        data = json.loads(body)
-
-        print("✅ Webhook recibido:")
-        print(data)
-
-        return JSONResponse(
-            status_code=200,
-            content={"message": "Webhook recibido correctamente"}
-        )
+        body = await request.json()
+        logger.info("📥 Webhook recibido:")
+        logger.info(body)
+        return {"status": "OK", "message": "Datos recibidos"}
     except Exception as e:
-        print("❌ Error al procesar webhook:", e)
-        return JSONResponse(
-            status_code=400,
-            content={"error": str(e)}
-        )
+        logger.error(f"❌ Error procesando webhook: {str(e)}")
+        return {"status": "ERROR", "detail": str(e)}
