@@ -1,3 +1,5 @@
+export PYTHONPATH=/app
+
 echo "🔄 Ejecutando pre_start.py..."
 python app/pre_start.py
 
