@@ -1,6 +1,5 @@
 import logging
 
-from app.seeders import init_seeders
 from app.core.settings import get_settings
 from app.core.database import SessionLocal
 
@@ -10,8 +9,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def init() -> None:
-    db = SessionLocal()
-    init_seeders.init_db(db)
+    SessionLocal()
 
 def main() -> None:
     logger.info("Creating initial data")
