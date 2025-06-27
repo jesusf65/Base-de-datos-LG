@@ -8,3 +8,4 @@ psycopg2-binary
 httpx
 requests
 alembic
+tenacity
