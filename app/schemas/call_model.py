@@ -17,7 +17,9 @@ class CallModelBase(BaseModel):
 # Properties to receive via API on creation
 class CallModelCreate(CallModelBase):
     pass
-    
+
+class CallModelUpdate(CallModelBase):
+    pass
 class CallModelInDb(CallModelBase):
     uuid: UUID4
     created_at: datetime = None

@@ -3,9 +3,9 @@ from fastapi import HTTPException
 
 from app.services.base import CRUDBase
 from app.models.CallModel import CallModel
-from app.schemas.call_model import CallModelCreate
+from app.schemas.call_model import CallModelCreate,CallModelInDb
 
-class CallController(CRUDBase[CallModel, CallModelCreate]):
+class CallController(CRUDBase[CallModel, CallModelCreate, CallModelInDb]):
     async def create_call(self,data: CallModelCreate, session:Session ):
         try:
             await self.create(db=session, obj_in=data)
