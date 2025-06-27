@@ -5,14 +5,12 @@ from pydantic import UUID4, BaseModel
 # Shared properties
 class CallModelBase(BaseModel):
     call_id: str = None
-    first_name: str= None
-    last_name: str = None
+    time_stamp: str= None
+    direction: str = None
+    direct_link: str = None
+    id_user: str = None
     phone_number: str = None
-    #id de la llaamada
-    #nombre del propietario 
-    #duracion de la llamada 
-    #link de grabacion de la llamada
-    #resultado de la llamada
+    status: str = None
 
 # Properties to receive via API on creation
 class CallModelCreate(CallModelBase):

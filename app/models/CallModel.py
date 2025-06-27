@@ -13,9 +13,12 @@ class CallModel(BaseModel):
         default=uuid4)
     
     call_id = Column(String(50), nullable=False)
-    first_name = Column(String(50), nullable=False)
-    last_name = Column(String(50), nullable=False)  
+    time_stamp = Column(String(50), nullable=False)
+    direction = Column(String(50), nullable=False)  
+    direct_link = Column(String(50), nullable=False)
+    id_user = Column(String(50), nullable=False)
     phone_number = Column(String(50), nullable=False)
+    status = Column(String(50), nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     deleted_at = Column(DateTime, nullable=True, default=None)
     
