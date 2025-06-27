@@ -4,10 +4,10 @@ from pydantic import UUID4, BaseModel
 
 # Shared properties
 class CallModelBase(BaseModel):
-    call_id: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone_number: Optional[str] = None
+    call_id: str = None
+    first_name: str= None
+    last_name: str = None
+    phone_number: str = None
     #id de la llaamada
     #nombre del propietario 
     #duracion de la llamada 
