@@ -1,4 +1,5 @@
-#!/bin/bash
+echo "🔄 Ejecutando pre_start.py..."
+python app/pre_start.py
 
-# Let the DB start
-python /app/pre_start.py
+echo "✅ Iniciando FastAPI..."
+uvicorn app.main:app --host 0.0.0.0 --port 8000
