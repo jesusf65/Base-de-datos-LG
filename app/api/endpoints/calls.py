@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, status, Depends
+from fastapi.responses import JSONResponse
 import logging
 from sqlalchemy.orm import Session
 
@@ -24,5 +25,5 @@ async def aircall_webhook(request: Request):
     
 @router.post("/call_create", status_code=status.HTTP_201_CREATED)
 async def create_call(data:CallModelCreate, session: Session = Depends(get_session)):
-    calls = call_controller.create_call(data=data, session=session)
-    return calls
+    await call_controller.create_call(data=data, session=session)
+    return JSONResponse({'message': 'created'})

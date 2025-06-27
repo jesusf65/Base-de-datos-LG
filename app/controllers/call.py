@@ -8,8 +8,7 @@ from app.schemas.call_model import CallModelCreate,CallModelUpdate
 class CallController(CRUDBase[CallModel, CallModelCreate, CallModelUpdate]):
     async def create_call(self, data: CallModelCreate, session: Session):
         try:
-            call = self.create(db=session, obj_in=data)
-            return call
+            self.create(db=session, obj_in=data)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Hay un error: {str(e)}")
     
