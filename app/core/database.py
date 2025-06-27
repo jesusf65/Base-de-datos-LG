@@ -1,6 +1,6 @@
-from sqlalchemy import create_engine
 from typing import Generator
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import create_engine
 
 from app.core.settings import get_settings
 
