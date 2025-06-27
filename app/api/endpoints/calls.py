@@ -24,5 +24,5 @@ async def aircall_webhook(request: Request):
     
 @router.post("/call_create", status_code=status.HTTP_201_CREATED)
 async def create_call(data:CallModelCreate, session: Session = Depends(get_session)):
-    call = call_controller.create_call(data=data, session=session)
-    return call
+    calls = call_controller.create_call(data=data, session=session)
+    return calls
