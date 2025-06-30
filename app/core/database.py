@@ -6,7 +6,7 @@ from app.core.settings import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.DATABASE_URL,connect_args={"options": f"-c timezone=America/Bogota"},
+engine = create_engine(settings.DATABASE_URL,
                        pool_pre_ping=True,
                        pool_recycle=3600,
                        pool_size=20,
@@ -14,6 +14,7 @@ engine = create_engine(settings.DATABASE_URL,connect_args={"options": f"-c timez
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
+
 
 def get_session() -> Generator:
     session = SessionLocal()
