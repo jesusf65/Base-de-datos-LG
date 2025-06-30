@@ -5,7 +5,7 @@ from pydantic import UUID4, BaseModel
 # Shared properties
 class CallModelBase(BaseModel):
     call_id: str = None
-    time_stamp: str= None
+    time_stamp: str = None
     direction: str = None
     direct_link: str = None
     id_user: str = None
