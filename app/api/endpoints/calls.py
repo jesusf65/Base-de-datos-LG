@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.core.database import get_session
-from app.models.CallModel import CallModel
-from app.schemas.call_model import CallModelCreate
-from uuid import uuid4
-from datetime import datetime 
-
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 import logging
+from datetime import datetime 
+from uuid import uuid4
+
+from app.schemas.call_model import CallModelCreate
+from app.models.CallModel import CallModel
+from app.core.database import get_session
 from app.controllers.call import call_controller
 from app.core.database import get_session
 

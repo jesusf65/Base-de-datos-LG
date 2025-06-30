@@ -15,7 +15,6 @@ engine = create_engine(settings.DATABASE_URL,connect_args={"options": f"-c timez
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
-
 def get_session() -> Generator:
     session = SessionLocal()
     try:
