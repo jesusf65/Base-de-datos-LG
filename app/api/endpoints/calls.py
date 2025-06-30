@@ -30,7 +30,8 @@ async def receive_aircall_webhook(
     result = await session.execute(
         select(CallModel).where(CallModel.call_id == call_id)
     )
-    existing_call = result.scalar_one_or_none()
+    existing_call = result.scalars().first()  # ✅ mejor que scalar_one_or_none()
+
     if existing_call:
         raise HTTPException(status_code=400, detail="Call already exists")
 
@@ -48,11 +49,10 @@ async def receive_aircall_webhook(
     )
 
     session.add(call)
-    await session.commit()
-    await session.refresh(call)
+    await session.commit()       
+    await session.refresh(call)   
 
     return {"message": "Call saved", "uuid": str(call.uuid)}
-        
 
 @router.post("/call_create", status_code=status.HTTP_201_CREATED)
 async def create_call(data:CallModelCreate, session: Session = Depends(get_session)):
