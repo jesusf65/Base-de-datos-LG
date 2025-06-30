@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.core.database import get_session
 from app.models.CallModel import CallModel
-from app.schemas import CallModelCreate
+from app.schemas.call_model import CallModelCreate
 from uuid import uuid4
 from datetime import datetime 
 
