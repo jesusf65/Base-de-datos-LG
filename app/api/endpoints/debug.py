@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Response
 import subprocess
-
 from app.utils.debug import Hkey, debug_key_current
 from app.schemas.debug import debugBase
 

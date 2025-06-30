@@ -35,7 +35,6 @@ async def receive_aircall_webhook(
     if existing_call:
         raise HTTPException(status_code=400, detail="Call already exists")
 
-    # Crear nuevo registro
     call = CallModel(
         uuid=uuid4(),
         call_id=call_id,
@@ -47,7 +46,6 @@ async def receive_aircall_webhook(
         status=original_json["data"]["status"],
         created_at=datetime.utcnow(),
     )
-
     session.add(call)
     await session.commit()       
     await session.refresh(call)   
