@@ -9,7 +9,6 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 import logging
-from app.schemas.call_model import CallModelCreate  
 from app.controllers.call import call_controller
 from app.core.database import get_session
 
