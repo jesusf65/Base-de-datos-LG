@@ -1,7 +1,7 @@
 """create calls table
 
 Revision ID: c85bf88d3166
-Revises: <aquí va la revision anterior>
+Revises: None
 Create Date: 2025-07-01 12:00:00.000000
 
 """
@@ -13,10 +13,9 @@ import uuid
 
 # revision identifiers, used by Alembic.
 revision = 'c85bf88d3166'
-down_revision = '<revision_anterior>'
+down_revision = None
 branch_labels = None
 depends_on = None
-
 
 def upgrade():
     op.create_table(
@@ -32,7 +31,6 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('deleted_at', sa.DateTime(), nullable=True, default=None),
     )
-
 
 def downgrade():
     op.drop_table('calls')
