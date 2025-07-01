@@ -25,8 +25,8 @@ async def receive_aircall_webhook(request: Request):
     if data.get("event") != "call.ended":
         return {"message": "Evento ignorado"}
 
-    logger.info("📥 Evento 'call.ended' recibido, esperando 10s...")
-    await asyncio.sleep(10)
+    logger.info("📥 Evento 'call.ended' recibido, esperando 50s...")
+    await asyncio.sleep(50)
     logger.info(f"📄 Log de la llamada:\n{data}")
 
     return {"message": "Llamada registrada en consola"}
