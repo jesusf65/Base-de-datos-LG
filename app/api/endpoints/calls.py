@@ -16,6 +16,7 @@ from app.core.database import get_session
 
 router = APIRouter()
 
+AIRCALL_API_ID = "28123d667f9bdfe2ddfe8222850ae464" 
 AIRCALL_API_TOKEN = "ca27cfdfb8ec3ad032150c54c8525065"
 AIRCALL_BASE_URL = "https://api.aircall.io/v1"
 
@@ -41,11 +42,11 @@ async def receive_aircall_webhook(request: Request):
         logger.info("⏳ Esperando 30 segundos para permitir que el recording se genere...")
         await asyncio.sleep(30)
 
-        # 🔁 Consultar el recording desde la API de Aircall
+        # Consulta la API con autenticación básica
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{AIRCALL_BASE_URL}/calls/{call_id}",
-                headers={"Authorization": AIRCALL_API_TOKEN}
+                auth=(AIRCALL_API_ID, AIRCALL_API_TOKEN)
             )
 
         if response.status_code == 200:
