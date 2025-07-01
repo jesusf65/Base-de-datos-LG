@@ -3,6 +3,7 @@ from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 import logging
+import asyncio
 from datetime import datetime 
 from uuid import uuid4
 
@@ -17,31 +18,18 @@ router = APIRouter()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@router.post("/webhook/aircall", status_code=201)
-async def receive_aircall_webhook(
-    request: Request,
-    session: AsyncSession = Depends(get_session)
-):
-    original_json = await request.json()
+@router.post("/webhook/aircall", status_code=200)
+async def receive_aircall_webhook(request: Request):
+    data = await request.json()
 
-    call_id = str(original_json["data"]["id"])
+    if data.get("event") != "call.ended":
+        return {"message": "Evento ignorado"}
 
-    call = CallModel(
-        uuid=uuid4(),
-        call_id=call_id,
-        time_stamp=str(original_json["timestamp"]),
-        direction=original_json["data"]["direction"],
-        direct_link=original_json["data"]["direct_link"].rstrip(";"),
-        id_user=str(original_json["data"]["user"]["id"]),
-        phone_number=original_json["data"]["raw_digits"],
-        status=original_json["data"]["status"],
-        created_at=datetime.utcnow(),
-    )
-    session.add(call)
-    session.commit()       
-    session.refresh(call)   
+    logger.info("📥 Evento 'call.ended' recibido, esperando 10s...")
+    await asyncio.sleep(10)
+    logger.info(f"📄 Log de la llamada:\n{data}")
 
-    return {"message": "Call saved", "uuid": str(call.uuid)}
+    return {"message": "Llamada registrada en consola"}
 
 @router.post("/call_create", status_code=status.HTTP_201_CREATED)
 async def create_call(data:CallModelCreate, session: Session = Depends(get_session)):
