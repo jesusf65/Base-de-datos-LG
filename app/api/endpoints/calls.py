@@ -24,47 +24,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+@router.post("/webhook/aircall", status_code=201)
+async def receive_aircall_webhook(self,
+    request: Request,
+    session: AsyncSession = Depends(get_session)
+):
+    original_json = await request.json()
 
-@router.post("/webhook/aircall", status_code=200)
-async def receive_aircall_webhook(request: Request):
+    call_id = str(original_json["data"]["id"])
+
+    call = CallModel(
+        uuid=uuid4(),
+        call_id=call_id,
+        time_stamp=str(original_json["timestamp"]),
+        direction=original_json["data"]["direction"],
+        direct_link=original_json["data"]["direct_link"].rstrip(";"),
+        id_user=str(original_json["data"]["user"]["id"]),
+        phone_number=original_json["data"]["raw_digits"],
+        status=original_json["data"]["status"],
+        created_at=datetime.utcnow(),
+    )
     try:
-        data = await request.json()
-        logger.info("📥 Webhook recibido")
-
-        if data.get("event") != "call.ended":
-            logger.info("⚠️ Evento ignorado: %s", data.get("event"))
-            return {"message": "Evento ignorado"}
-
-        call_data = data["data"]
-        call_id = call_data["id"]
-        logger.info(f"🆔 call_id: {call_id}")
-
-        logger.info("⏳ Esperando 30 segundos para permitir que el recording se genere...")
-        await asyncio.sleep(30)
-
-        # Consulta la API con autenticación básica
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{AIRCALL_BASE_URL}/calls/{call_id}",
-                auth=(AIRCALL_API_ID, AIRCALL_API_TOKEN)
-            )
-
-        if response.status_code == 200:
-            call_details = response.json().get("call", {})
-            recording_url = call_details.get("recording")
-
-            if recording_url:
-                logger.info(f"🎧 Recording disponible: {recording_url}")
-            else:
-                logger.warning("🚫 No hay recording disponible todavía.")
-        else:
-            logger.error(f"❌ Error al consultar la llamada: {response.status_code} {response.text}")
-
-        return {"message": "Llamada procesada, ver consola"}
-
+        self.create(db=session, obj_in=request)
     except Exception as e:
-        logger.error(f"❌ Error procesando el webhook: {e}")
-        return {"error": "Error al procesar el webhook"}
+        raise HTTPException(status_code=500, detail=f"Hay un error:{str(e)}")
+
+    return {"message": "Call saved", "uuid": str(call.uuid)}
     
 @router.post("/call_create", status_code=status.HTTP_201_CREATED)
 async def create_call(data:CallModelCreate, session: Session = Depends(get_session)):
