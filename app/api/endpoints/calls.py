@@ -16,7 +16,7 @@ router = APIRouter()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@router.post("/webhook/aircall", status_code=201)
+@router.post("/webhook/aircall")
 async def receive_aircall_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session)
@@ -39,6 +39,8 @@ async def receive_aircall_webhook(
     session.add(call)
     session.commit()       
     session.refresh(call)   
+
+    logger.info(f"New call received - Call ID: {call.call_id}, Status: {call.status}, phone_number: {call.phone_number}")
 
     return {"message": "Call saved", "uuid": str(call.uuid)}
     
