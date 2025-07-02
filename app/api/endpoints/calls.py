@@ -1,11 +1,8 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status
-from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 import logging
-import asyncio
 from datetime import datetime 
-import httpx
 from uuid import uuid4
 
 from app.schemas.call_model import CallModelCreate
@@ -16,16 +13,11 @@ from app.core.database import get_session
 
 router = APIRouter()
 
-AIRCALL_API_ID = "28123d667f9bdfe2ddfe8222850ae464" 
-AIRCALL_API_TOKEN = "ca27cfdfb8ec3ad032150c54c8525065"
-AIRCALL_BASE_URL = "https://api.aircall.io/v1"
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 @router.post("/webhook/aircall", status_code=201)
-async def receive_aircall_webhook(self,
+async def receive_aircall_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session)
 ):
@@ -44,10 +36,9 @@ async def receive_aircall_webhook(self,
         status=original_json["data"]["status"],
         created_at=datetime.utcnow(),
     )
-    try:
-        self.create(db=session, obj_in=request)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Hay un error:{str(e)}")
+    session.add(call)
+    session.commit()       
+    session.refresh(call)   
 
     return {"message": "Call saved", "uuid": str(call.uuid)}
     
