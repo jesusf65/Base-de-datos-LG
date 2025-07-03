@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 API_KEY_CRM = get_settings().API_KEY_CRM
 
 dotenv.load_dotenv()
-CUSTOM_FIELD_KEY = "veces_contactado"
+CUSTOM_FIELD_KEY = "Número de veces contactado"
 CUSTOM_FIELD_ID = "MUiuwmOLvjHwYBmktZt7" 
 """
     Controlador para interactuar con la API de GoHighLevel.
