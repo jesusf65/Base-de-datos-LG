@@ -10,6 +10,7 @@ API_KEY_CRM = get_settings().API_KEY_CRM
 
 dotenv.load_dotenv()
 CUSTOM_FIELD_KEY = "veces_contactado"
+CUSTOM_FIELD_ID = "MUiuwmOLvjHwYBmktZt7" 
 """
     Controlador para interactuar con la API de GoHighLevel.
     """
@@ -60,19 +61,18 @@ class GhlController:
 
     async def update_contact_call_count(self, contact_id: str):
         """
-        Actualiza el campo personalizado 'veces_contactado' de forma incremental,
-        preservando otros campos personalizados.
+        Versión definitiva: Actualiza el campo 'veces_contactado' de forma incremental,
+        usando el ID para la creación y la KEY para la actualización.
         """
         update_url = f"{self.base_url}/contacts/{contact_id}"
         
         async with httpx.AsyncClient() as client:
             try:
-                # 1. Obtener los datos actuales del contacto para leer la lista completa de campos
+                # 1. Obtener los datos actuales del contacto
                 get_response = await client.get(update_url, headers=self.headers)
                 get_response.raise_for_status()
                 contact_data = get_response.json().get("contact", {})
                 
-                # Obtenemos una copia de la lista de campos personalizados existentes
                 custom_fields = contact_data.get("customFields", [])
                 if custom_fields is None:
                     custom_fields = []
@@ -80,38 +80,38 @@ class GhlController:
                 call_count = 0
                 field_found = False
 
-                # 2. Buscamos el campo por su 'key' para actualizarlo DENTRO de la lista
+                # 2. Buscar el campo por su 'key' para actualizarlo
                 for field in custom_fields:
-                    if field.get("key") == CUSTOM_FIELD_KEY:
+                    if field.get("key") == CUSTOM_FIELD_KEY or field.get("id") == CUSTOM_FIELD_ID:
                         try:
-                            # Obtenemos el valor actual y lo convertimos a número
                             current_value = field.get("value", "0")
+                            # El campo es numérico, la conversión es más segura
                             call_count = int(float(current_value)) if current_value else 0
                         except (ValueError, TypeError):
-                            call_count = 0 # Si no es un número, reseteamos a 0
+                            call_count = 0
                         
-                        # Incrementamos y actualizamos el valor en la lista existente
+                        # Incrementar y actualizar el valor en la lista
                         field['value'] = call_count + 1
                         field_found = True
                         break
                 
-                # 3. Si el campo no existía en la lista del contacto, lo añadimos
+                # 3. Si el campo no existía, lo añadimos usando su ID y Key
                 if not field_found:
                     custom_fields.append({
+                        "id": CUSTOM_FIELD_ID,
                         "key": CUSTOM_FIELD_KEY,
                         "value": 1
                     })
 
-                # 4. Preparamos el payload para la actualización CON LA LISTA COMPLETA
-                # Esto evita que se borren otros campos personalizados del contacto.
+                # 4. Preparar el payload con la lista completa de campos
                 update_payload = {
                     "customFields": custom_fields
                 }
                 
-                new_value = next((f['value'] for f in custom_fields if f['key'] == CUSTOM_FIELD_KEY), 'N/A')
-                logger.info(f"Actualizando contacto ID {contact_id}. Payload completo enviado. Nuevo contador para '{CUSTOM_FIELD_KEY}': {new_value}")
+                new_value = next((f['value'] for f in custom_fields if f.get('key') == CUSTOM_FIELD_KEY), 'N/A')
+                logger.info(f"Actualizando contacto ID {contact_id}. Nuevo contador para '{CUSTOM_FIELD_KEY}': {new_value}")
                 
-                # 5. Enviamos la petición PUT con la lista de campos actualizada
+                # 5. Enviar la petición PUT para actualizar
                 put_response = await client.put(update_url, headers=self.headers, json=update_payload)
                 put_response.raise_for_status()
                 
