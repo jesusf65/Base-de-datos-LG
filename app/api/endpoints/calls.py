@@ -51,8 +51,8 @@ async def receive_aircall_webhook(
                 created_at=datetime.utcnow(),
             )
             session.add(call)
-            await session.commit()
-            await session.refresh(call)
+            session.commit()
+            session.refresh(call)
             logger.info(f"Nueva llamada guardada - Call ID: {call.call_id}, Status: {call.status}")
         
         # --- Lógica de GoHighLevel ---
