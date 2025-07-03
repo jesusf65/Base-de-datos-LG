@@ -26,16 +26,9 @@ class GhlController:
         }
 
     async def get_contact_by_phone(self, phone_number: str):
-        """
-        Paso 1: Busca un contacto en GoHighLevel por su número de teléfono.
-        Devuelve el primer contacto que coincida.
-        """
+        """Busca un contacto en GoHighLevel por su número de teléfono."""
         url = f"{self.base_url}/contacts/lookup"
-        # Normalizamos el número de teléfono eliminando caracteres no numéricos
         normalized_phone = "".join(filter(str.isdigit, phone_number))
-        
-        # La API de GHL a menudo espera el formato E.164, pero puede funcionar sin el '+'
-        # Probamos con el formato más común primero.
         params = {"phone": f"+{normalized_phone}"} 
         
         async with httpx.AsyncClient() as client:
@@ -53,7 +46,7 @@ class GhlController:
                     logger.warning(f"No se encontró ningún contacto con el teléfono: {normalized_phone}")
                     return None
             except httpx.HTTPStatusError as e:
-                logger.error(f"Error al buscar contacto en GHL: {e.response.status_code} - {e.response.text}")
+                logger.error(f"Error HTTP al buscar contacto en GHL: {e.response.status_code} - {e.response.text}")
                 return None
             except Exception as e:
                 logger.error(f"Error inesperado al buscar contacto: {e}")
@@ -80,17 +73,15 @@ class GhlController:
                 call_count = 0
                 field_found = False
 
-                # 2. Buscar el campo por su 'key' para actualizarlo
+                # 2. Buscar el campo por su 'key' o 'id' para actualizarlo
                 for field in custom_fields:
                     if field.get("key") == CUSTOM_FIELD_KEY or field.get("id") == CUSTOM_FIELD_ID:
                         try:
                             current_value = field.get("value", "0")
-                            # El campo es numérico, la conversión es más segura
                             call_count = int(float(current_value)) if current_value else 0
                         except (ValueError, TypeError):
                             call_count = 0
                         
-                        # Incrementar y actualizar el valor en la lista
                         field['value'] = call_count + 1
                         field_found = True
                         break
@@ -119,12 +110,11 @@ class GhlController:
                 return put_response.json()
 
             except httpx.HTTPStatusError as e:
-                logger.error(f"Error al actualizar contacto {contact_id}: {e.response.status_code} - {e.response.text}")
+                logger.error(f"Error HTTP al actualizar contacto {contact_id}: {e.response.status_code} - {e.response.text}")
                 return None
             except Exception as e:
                 logger.error(f"Error inesperado al actualizar contacto {contact_id}: {e}")
                 return None
 
-
-# Instanciamos el controlador una sola vez
+# Instanciamos el controlador
 ghl_controller = GhlController(api_key=API_KEY_CRM)

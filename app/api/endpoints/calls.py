@@ -22,49 +22,56 @@ async def receive_aircall_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session)
 ):
-    """
-    Paso 3: Recibe el webhook de Aircall, guarda la llamada y actualiza el contacto en GHL.
-    """
-    original_json = await request.json()
+    try:
+        original_json = await request.json()
 
-    # Extraemos el número de teléfono del payload del webhook
-    phone_number = original_json.get("data", {}).get("raw_digits")
+        # --- Extracción Segura de Datos para evitar KeyError ---
+        data = original_json.get("data", {})
+        user_info = data.get("user", {})
 
-    # --- Lógica para guardar la llamada en tu base de datos (tu código original) ---
-    call_id = str(original_json["data"]["id"])
-    call = CallModel(
-        uuid=uuid4(),
-        call_id=call_id,
-        time_stamp=str(original_json["timestamp"]),
-        direction=original_json["data"]["direction"],
-        direct_link=original_json["data"]["direct_link"].rstrip(";"),
-        id_user=str(original_json["data"]["user"]["id"]),
-        phone_number=phone_number,
-        status=original_json["data"]["status"],
-        created_at=datetime.utcnow(),
-    )
-    session.add(call)
-    session.commit()
-    session.refresh(call)
+        call_id = data.get("id")
+        timestamp = original_json.get("timestamp")
+        direction = data.get("direction")
+        direct_link = data.get("direct_link", "").rstrip(";")
+        id_user = user_info.get("id")
+        phone_number = data.get("raw_digits")
+        status = data.get("status")
 
-    logger.info(f"Nueva llamada guardada - Call ID: {call.call_id}, Status: {call.status}, phone_number: {call.phone_number}")
-    
-    # --- Nueva lógica para actualizar GoHighLevel ---
-    if not phone_number:
-        logger.warning("El webhook no contenía un número de teléfono ('raw_digits'). No se puede actualizar GHL.")
-        return {"message": "Llamada guardada, pero no se encontró número para actualizar GHL.", "uuid": str(call.uuid)}
+        # --- Guardado en Base de Datos ---
+        if call_id:
+            call = CallModel(
+                uuid=uuid4(),
+                call_id=str(call_id),
+                time_stamp=str(timestamp),
+                direction=direction,
+                direct_link=direct_link,
+                id_user=str(id_user) if id_user else None,
+                phone_number=phone_number,
+                status=status,
+                created_at=datetime.utcnow(),
+            )
+            session.add(call)
+            await session.commit()
+            await session.refresh(call)
+            logger.info(f"Nueva llamada guardada - Call ID: {call.call_id}, Status: {call.status}")
+        
+        # --- Lógica de GoHighLevel ---
+        if not phone_number:
+            logger.warning("El webhook no contenía un número de teléfono. No se puede actualizar GHL.")
+        else:
+            contact = await ghl_controller.get_contact_by_phone(phone_number)
 
-    # 1. Buscar el contacto en GHL
-    contact = await ghl_controller.get_contact_by_phone(phone_number)
+            if contact and contact.get("id"):
+                contact_id = contact["id"]
+                await ghl_controller.update_contact_call_count(contact_id)
+            else:
+                logger.info(f"No se procedió a la actualización en GHL porque no se encontró el contacto con teléfono {phone_number}.")
 
-    if contact and contact.get("id"):
-        # 2. Si se encuentra, actualizar el contador de llamadas
-        contact_id = contact["id"]
-        await ghl_controller.update_contact_call_count(contact_id)
-    else:
-        logger.info(f"No se procedió a la actualización en GHL porque no se encontró el contacto con teléfono {phone_number}.")
+    except Exception as e:
+        # Captura cualquier otro error inesperado para evitar que el servidor se caiga
+        logger.error(f"EXCEPCIÓN GENERAL en el webhook de Aircall: {e}", exc_info=True)
 
-    return {"message": "Llamada guardada y proceso de actualización en GHL iniciado.", "uuid": str(call.uuid)}
+    return {"message": "Webhook procesado."}
     
 @router.post("/call_create", status_code=status.HTTP_201_CREATED)
 async def create_call(data:CallModelCreate, session: Session = Depends(get_session)):
