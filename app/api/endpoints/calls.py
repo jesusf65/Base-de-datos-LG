@@ -15,14 +15,13 @@ router = APIRouter()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@router.post("/webhooks/aircall", status_code=201)  # Cambié a plural para coincidir con los logs
+@router.post("/webhooks/aircall", status_code=201) 
 async def receive_aircall_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session)
 ):
     try:
         original_json = await request.json()
-        logger.info(f"Received webhook data: {original_json}")
         
         # Validación de datos requeridos
         if not original_json.get("data"):
@@ -41,33 +40,35 @@ async def receive_aircall_webhook(
             raise HTTPException(status_code=422, detail="Missing user.id field")
         
         call_id = str(data["id"])
+        phone_number = data["raw_digits"]
+        direct_link = data["direct_link"].rstrip(";")
+        
+        logger.info(f"Call processed - Phone: {phone_number}, Call ID: {call_id}, Link: {direct_link}")
         
         call = CallModel(
             uuid=uuid4(),
             call_id=call_id,
             time_stamp=str(original_json.get("timestamp", "")),
             direction=data["direction"],
-            direct_link=data["direct_link"].rstrip(";"),
+            direct_link=direct_link,
             id_user=str(data["user"]["id"]),
-            phone_number=data["raw_digits"],
+            phone_number=phone_number,
             status=data["status"],
             created_at=datetime.utcnow(),
         )
         
         session.add(call)
-        session.commit()       # Usar await para operaciones async
-        session.refresh(call)   # Usar await para operaciones async
+        session.commit()      
+        session.refresh(call)  
         
         logger.info(f"Call saved successfully with UUID: {call.uuid}")
         return {"message": "Call saved", "uuid": str(call.uuid)}
         
     except Exception as e:
         logger.error(f"Error processing webhook: {str(e)}")
-        logger.error(f"Request data: {original_json if 'original_json' in locals() else 'No data'}")
         session.rollback()
         raise HTTPException(status_code=422, detail=f"Error processing webhook: {str(e)}")
 
-# Endpoint temporal para debugging - eliminar después
 @router.post("/webhooks/aircall/debug", status_code=200)
 async def debug_aircall_webhook(request: Request):
     try:
