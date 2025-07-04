@@ -23,4 +23,4 @@ class CallModel(BaseModel):
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     deleted_at = Column(DateTime, nullable=True, default=None)
     
-contact = relationship("Contact", backpopulates="contacts_table", uselist=False)
+contact = relationship("Contact", back_populates="contacts_table", uselist=False)
