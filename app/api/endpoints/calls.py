@@ -1,14 +1,12 @@
-from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi import APIRouter, Request, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from app.controllers.ghl import ghl_controller
-import logging
-from datetime import datetime 
 from uuid import uuid4
+from datetime import datetime 
+import logging
 
 from app.schemas.call_model import CallModelCreate
 from app.models.CallModel import CallModel
-from app.core.database import get_session
 from app.controllers.call import call_controller
 from app.core.database import get_session
 
@@ -17,7 +15,7 @@ router = APIRouter()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@router.post("/webhook/aircall")
+@router.post("/webhook/aircall", status_code=201)
 async def receive_aircall_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session)
@@ -40,8 +38,6 @@ async def receive_aircall_webhook(
     session.add(call)
     session.commit()       
     session.refresh(call)   
-
-    logger.info(f"New call received - Call ID: {call.call_id}, Status: {call.status}, phone_number: {call.phone_number}")
 
     return {"message": "Call saved", "uuid": str(call.uuid)}
     
