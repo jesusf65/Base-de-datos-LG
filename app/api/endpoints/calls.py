@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @router.post("/webhook/call")
-async def webhook_call(request: Request, db: Session = Depends(get_db)):
+async def webhook_call(request: Request, db: Session = Depends(get_session)):
     """
     Webhook que recibe llamadas y las procesa
     """
