@@ -168,7 +168,7 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
 # ENDPOINT ADICIONAL PARA TESTING
 # ============================
 @router.post("/webhook/call/test")
-async def test_webhook(call_data: dict, db: Session = Depends(get_db)):
+async def test_webhook(call_data: dict, db: Session = Depends(get_session)):
     """
     Endpoint de prueba que usa el modelo Pydantic
     """
