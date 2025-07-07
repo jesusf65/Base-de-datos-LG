@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Request, Depends, status, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from uuid import uuid4
+import json
 from datetime import datetime 
 import logging
 
 from app.schemas.call_model import CallModelCreate
 from app.models.CallModel import CallModel
+from app.models.Contacts import Contact
 from app.controllers.call import call_controller
 from app.core.database import get_session
 
@@ -15,59 +16,81 @@ router = APIRouter()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@router.post("/webhooks/aircall", status_code=201) 
-async def receive_aircall_webhook(
-    request: Request,
-    session: AsyncSession = Depends(get_session)
-):
+@router.post("/webhook/call")
+async def webhook_call(call_data: dict, db: Session = Depends(get_session)):
+    """
+    Webhook que recibe llamadas y las procesa
+    """
     try:
-        original_json = await request.json()
-        
-        # Validación de datos requeridos
-        if not original_json.get("data"):
-            raise HTTPException(status_code=422, detail="Missing 'data' field")
-            
-        data = original_json["data"]
-        
-        # Validar campos requeridos
-        required_fields = ["id", "direction", "direct_link", "user", "raw_digits", "status"]
-        for field in required_fields:
-            if field not in data:
-                raise HTTPException(status_code=422, detail=f"Missing required field: {field}")
-        
-        # Validar que user tenga id
-        if "id" not in data.get("user", {}):
-            raise HTTPException(status_code=422, detail="Missing user.id field")
-        
-        call_id = str(data["id"])
-        phone_number = data["raw_digits"]
-        direct_link = data["direct_link"].rstrip(";")
-        
-        logger.info(f"Call processed - Phone: {phone_number}, Call ID: {call_id}, Link: {direct_link}")
-        
-        call = CallModel(
-            uuid=uuid4(),
-            call_id=call_id,
-            time_stamp=str(original_json.get("timestamp", "")),
-            direction=data["direction"],
-            direct_link=direct_link,
-            id_user=str(data["user"]["id"]),
-            phone_number=phone_number,
-            status=data["status"],
-            created_at=datetime.utcnow(),
+        # Paso 1: Crear y guardar la llamada
+        new_call = CallModel(
+            call_id=call_data.get("call_id"),
+            time_stamp=call_data.get("time_stamp"),
+            direction=call_data.get("direction"),
+            direct_link=call_data.get("direct_link"),
+            id_user=call_data.get("id_user"),
+            phone_number=call_data.get("phone_number"),
+            status=call_data.get("status")
         )
         
-        session.add(call)
-        session.commit()      
-        session.refresh(call)  
+        db.add(new_call)
+        db.flush()  # Para obtener el UUID sin hacer commit
         
-        logger.info(f"Call saved successfully with UUID: {call.uuid}")
-        return {"message": "Call saved", "uuid": str(call.uuid)}
+        # Paso 2: Buscar contacto por número de teléfono
+        existing_contact = db.query(Contact).filter(
+            Contact.phone_number == call_data.get("phone_number"),
+            Contact.deleted_at.is_(None)
+        ).first()
+        
+        if existing_contact:
+            # Paso 3a: Si existe el contacto, incrementar contador
+            contact_to_update = existing_contact
+            
+            # Incrementar contador en custom_fields
+            try:
+                current_data = json.loads(contact_to_update.custom_fields) if contact_to_update.custom_fields else {}
+            except (json.JSONDecodeError, TypeError):
+                current_data = {}
+            
+            current_data["call_count"] = current_data.get("call_count", 0) + 1
+            contact_to_update.custom_fields = json.dumps(current_data)
+            
+        else:
+            # Paso 3b: Si no existe, crear nuevo contacto
+            contact_to_update = Contact(
+                contact_id=f"AUTO_{new_call.uuid}",  # ID automático
+                contact_name=f"Contact_{call_data.get('phone_number')}",  # Nombre automático
+                create_date=datetime.now().isoformat(),
+                asign_to="",  # Vacío por defecto
+                phone_number=call_data.get("phone_number"),
+                source="webhook_call",  # Fuente automática
+                tags="",  # Vacío por defecto
+                custom_fields=json.dumps({"call_count": 1})  # Primer llamada
+            )
+            
+            db.add(contact_to_update)
+            db.flush()  # Para obtener el UUID
+        
+        # Paso 4: Asociar el contacto a la llamada
+        new_call.contact_uuid = contact_to_update.uuid
+        
+        # Paso 5: Guardar todo
+        db.commit()
+        
+        return {
+            "status": "success",
+            "message": "Llamada procesada correctamente",
+            "call_uuid": str(new_call.uuid),
+            "contact_uuid": str(contact_to_update.uuid),
+            "call_count": json.loads(contact_to_update.custom_fields).get("call_count", 0)
+        }
         
     except Exception as e:
-        logger.error(f"Error processing webhook: {str(e)}")
-        session.rollback()
-        raise HTTPException(status_code=422, detail=f"Error processing webhook: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error procesando llamada: {str(e)}"
+        )
 
 @router.post("/webhooks/aircall/debug", status_code=200)
 async def debug_aircall_webhook(request: Request):

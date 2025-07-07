@@ -1,5 +1,5 @@
 from uuid import uuid4
-from sqlalchemy import Column, DateTime, String, func
+from sqlalchemy import Column, DateTime, String, func, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -14,6 +14,7 @@ class CallModel(BaseModel):
         default=uuid4)
     
     call_id = Column(String(50), nullable=False)
+    contact_uuid = Column(UUID(as_uuid=True), ForeignKey('contact.uuid'), nullable=True)
     time_stamp = Column(String(50), nullable=False)
     direction = Column(String(50), nullable=False)  
     direct_link = Column(String(50), nullable=False)
@@ -23,4 +24,4 @@ class CallModel(BaseModel):
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     deleted_at = Column(DateTime, nullable=True, default=None)
     
-contact = relationship("Contact", back_populates="contacts_table", uselist=False)
+contact = relationship("Contact", back_populates="calls")

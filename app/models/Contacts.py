@@ -1,5 +1,5 @@
 from uuid import uuid4
-from sqlalchemy import Column, DateTime, String, func
+from sqlalchemy import Column, DateTime, String, func, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship     
 
@@ -19,9 +19,9 @@ class Contact(BaseModel):
     asign_to = Column(String(50), nullable=False)  
     phone_number = Column(String(50), nullable=False)
     source = Column(String(50), nullable=False)
-    tags = Column(String(50), nullable=False)
+    tags = Column(Text, nullable=False)
     custom_fields = Column(String(50), nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     deleted_at = Column(DateTime, nullable=True, default=None)
     
-contacts_table = relationship("CallModel", back_populates="contact")
+calls = relationship("CallModel", back_populates="contact")
