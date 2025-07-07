@@ -20,7 +20,7 @@ class Contact(BaseModel):
     phone_number = Column(String(50), nullable=False)
     source = Column(String(50), nullable=False)
     tags = Column(Text, nullable=False)
-    custom_fields = Column(String(50), nullable=False)
+    call_count = Column(String(50), nullable=False)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     deleted_at = Column(DateTime, nullable=True, default=None)
     

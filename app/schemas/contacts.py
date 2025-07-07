@@ -11,7 +11,7 @@ class ContactModel(BaseModel):
     phone_number: str = None
     source: str = None
     tags: str = None
-    custom_fields: str = None
+    call_count:  str = None
 
 # Properties to receive via API on creation
 class CallModelCreate(ContactModel):

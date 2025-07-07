@@ -48,12 +48,9 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
         
         # Paso 2: Extraer datos de Aircall y mapear a nuestros campos
         try:
-            # Extraer datos del webhook de Aircall
             data = call_data.get("data", {})
             user = data.get("user", {})
-            number = data.get("number", {})
             
-            # Mapear campos de Aircall a nuestros campos
             mapped_data = {
                 "call_id": str(data.get("id", "")),
                 "time_stamp": str(call_data.get("timestamp", "")),
@@ -73,7 +70,7 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
                 detail=f"Error procesando datos de Aircall: {str(e)}"
             )
         
-        # Paso 3: Validar campos requeridos después del mapeo
+        # Paso 3: Validar campos requeridos
         required_fields = ["call_id", "time_stamp", "direction", "direct_link", "id_user", "phone_number", "status"]
         missing_fields = [field for field in required_fields if not mapped_data.get(field)]
         
@@ -97,9 +94,9 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
         )
         
         db.add(new_call)
-        db.flush()  # Para obtener el UUID sin hacer commit
+        db.flush()
         
-        # Paso 5: Buscar contacto por número de teléfono
+        # Paso 5: Buscar contacto por número
         phone_number = mapped_data["phone_number"]
         existing_contact = db.query(Contact).filter(
             Contact.phone_number == phone_number,
@@ -107,22 +104,9 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
         ).first()
         
         if existing_contact:
-            # Paso 6a: Si existe el contacto, incrementar contador
             contact_to_update = existing_contact
-            logger.info(f"Contacto encontrado: {contact_to_update.uuid}")
-            
-            # Incrementar contador en custom_fields
-            try:
-                current_data = json.loads(contact_to_update.custom_fields) if contact_to_update.custom_fields else {}
-            except (json.JSONDecodeError, TypeError):
-                current_data = {}
-            
-            current_data["call_count"] = current_data.get("call_count", 0) + 1
-            contact_to_update.custom_fields = json.dumps(current_data)
-            
+            contact_to_update.call_count = (contact_to_update.call_count or 0) + 1
         else:
-            # Paso 6b: Si no existe, crear nuevo contacto
-            logger.info(f"Creando nuevo contacto para teléfono: {phone_number}")
             contact_to_update = Contact(
                 contact_id=f"AUTO_{new_call.uuid}",
                 contact_name=f"Contact_{phone_number}",
@@ -131,16 +115,13 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
                 phone_number=phone_number,
                 source="aircall_webhook",
                 tags="",
-                custom_fields=json.dumps({"call_count": 1})
+                call_count=1
             )
-            
             db.add(contact_to_update)
             db.flush()
         
-        # Paso 7: Asociar el contacto a la llamada
+        # Paso 6: Asociar llamada al contacto
         new_call.contact_uuid = contact_to_update.uuid
-        
-        # Paso 8: Guardar todo
         db.commit()
         
         logger.info(f"Llamada procesada exitosamente: {new_call.uuid}")
@@ -150,7 +131,7 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
             "message": "Llamada procesada correctamente",
             "call_uuid": str(new_call.uuid),
             "contact_uuid": str(contact_to_update.uuid),
-            "call_count": json.loads(contact_to_update.custom_fields).get("call_count", 0)
+            "call_count": contact_to_update.call_count
         }
         
     except HTTPException:
@@ -164,18 +145,15 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
             detail=f"Error procesando llamada: {str(e)}"
         )
 
-# ============================
-# ENDPOINT ADICIONAL PARA TESTING
-# ============================
+
 @router.post("/webhook/call/test")
 async def test_webhook(call_data: dict, db: Session = Depends(get_session)):
     """
-    Endpoint de prueba que usa el modelo Pydantic
+    Endpoint de prueba
     """
     try:
         logger.info(f"Datos de prueba: {call_data}")
         
-        # Procesar usando la misma lógica
         new_call = CallModel(
             call_id=str(call_data.get("call_id", "test_call")),
             time_stamp=str(call_data.get("time_stamp", datetime.now().isoformat())),
@@ -189,7 +167,6 @@ async def test_webhook(call_data: dict, db: Session = Depends(get_session)):
         db.add(new_call)
         db.flush()
         
-        # Buscar o crear contacto
         phone_number = str(call_data.get("phone_number", "+1234567890"))
         existing_contact = db.query(Contact).filter(
             Contact.phone_number == phone_number,
@@ -198,13 +175,7 @@ async def test_webhook(call_data: dict, db: Session = Depends(get_session)):
         
         if existing_contact:
             contact_to_update = existing_contact
-            try:
-                current_data = json.loads(contact_to_update.custom_fields) if contact_to_update.custom_fields else {}
-            except (json.JSONDecodeError, TypeError):
-                current_data = {}
-            
-            current_data["call_count"] = current_data.get("call_count", 0) + 1
-            contact_to_update.custom_fields = json.dumps(current_data)
+            contact_to_update.call_count = (contact_to_update.call_count or 0) + 1
         else:
             contact_to_update = Contact(
                 contact_id=f"AUTO_{new_call.uuid}",
@@ -214,7 +185,7 @@ async def test_webhook(call_data: dict, db: Session = Depends(get_session)):
                 phone_number=phone_number,
                 source="webhook_call",
                 tags="",
-                custom_fields=json.dumps({"call_count": 1})
+                call_count=1
             )
             db.add(contact_to_update)
             db.flush()
@@ -227,7 +198,7 @@ async def test_webhook(call_data: dict, db: Session = Depends(get_session)):
             "message": "Test completado",
             "call_uuid": str(new_call.uuid),
             "contact_uuid": str(contact_to_update.uuid),
-            "call_count": json.loads(contact_to_update.custom_fields).get("call_count", 0)
+            "call_count": contact_to_update.call_count
         }
         
     except Exception as e:
@@ -241,7 +212,7 @@ async def test_webhook(call_data: dict, db: Session = Depends(get_session)):
 @router.get("/webhook/call/health")
 async def health_check():
     """
-    Endpoint simple para verificar que el webhook está funcionando
+    Health check
     """
     return {
         "status": "healthy",
