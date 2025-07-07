@@ -46,40 +46,68 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
                 detail=f"Error leyendo datos: {str(e)}"
             )
         
-        # Paso 2: Validar campos requeridos
+        # Paso 2: Extraer datos de Aircall y mapear a nuestros campos
+        try:
+            # Extraer datos del webhook de Aircall
+            data = call_data.get("data", {})
+            user = data.get("user", {})
+            number = data.get("number", {})
+            
+            # Mapear campos de Aircall a nuestros campos
+            mapped_data = {
+                "call_id": str(data.get("id", "")),
+                "time_stamp": str(call_data.get("timestamp", "")),
+                "direction": str(data.get("direction", "")),
+                "direct_link": str(data.get("direct_link", "")),
+                "id_user": str(user.get("id", "")),
+                "phone_number": str(data.get("raw_digits", "")),
+                "status": str(data.get("status", ""))
+            }
+            
+            logger.info(f"Datos mapeados: {mapped_data}")
+            
+        except Exception as e:
+            logger.error(f"Error mapeando datos de Aircall: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error procesando datos de Aircall: {str(e)}"
+            )
+        
+        # Paso 3: Validar campos requeridos después del mapeo
         required_fields = ["call_id", "time_stamp", "direction", "direct_link", "id_user", "phone_number", "status"]
-        missing_fields = [field for field in required_fields if not call_data.get(field)]
+        missing_fields = [field for field in required_fields if not mapped_data.get(field)]
         
         if missing_fields:
-            logger.error(f"Campos faltantes: {missing_fields}")
+            logger.error(f"Campos faltantes después del mapeo: {missing_fields}")
+            logger.error(f"Datos originales: {call_data}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Campos requeridos faltantes: {missing_fields}"
             )
         
-        # Paso 3: Crear y guardar la llamada
+        # Paso 4: Crear y guardar la llamada
         new_call = CallModel(
-            call_id=str(call_data.get("call_id")),
-            time_stamp=str(call_data.get("time_stamp")),
-            direction=str(call_data.get("direction")),
-            direct_link=str(call_data.get("direct_link")),
-            id_user=str(call_data.get("id_user")),
-            phone_number=str(call_data.get("phone_number")),
-            status=str(call_data.get("status"))
+            call_id=mapped_data["call_id"],
+            time_stamp=mapped_data["time_stamp"],
+            direction=mapped_data["direction"],
+            direct_link=mapped_data["direct_link"],
+            id_user=mapped_data["id_user"],
+            phone_number=mapped_data["phone_number"],
+            status=mapped_data["status"]
         )
         
         db.add(new_call)
         db.flush()  # Para obtener el UUID sin hacer commit
         
-        # Paso 4: Buscar contacto por número de teléfono
-        phone_number = str(call_data.get("phone_number"))
+        # Paso 5: Buscar contacto por número de teléfono
+        phone_number = mapped_data["phone_number"]
         existing_contact = db.query(Contact).filter(
             Contact.phone_number == phone_number,
             Contact.deleted_at.is_(None)
         ).first()
         
         if existing_contact:
-            # Paso 5a: Si existe el contacto, incrementar contador
+            # Paso 6a: Si existe el contacto, incrementar contador
             contact_to_update = existing_contact
             logger.info(f"Contacto encontrado: {contact_to_update.uuid}")
             
@@ -93,7 +121,7 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
             contact_to_update.custom_fields = json.dumps(current_data)
             
         else:
-            # Paso 5b: Si no existe, crear nuevo contacto
+            # Paso 6b: Si no existe, crear nuevo contacto
             logger.info(f"Creando nuevo contacto para teléfono: {phone_number}")
             contact_to_update = Contact(
                 contact_id=f"AUTO_{new_call.uuid}",
@@ -101,7 +129,7 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
                 create_date=datetime.now().isoformat(),
                 asign_to="",
                 phone_number=phone_number,
-                source="webhook_call",
+                source="aircall_webhook",
                 tags="",
                 custom_fields=json.dumps({"call_count": 1})
             )
@@ -109,10 +137,10 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
             db.add(contact_to_update)
             db.flush()
         
-        # Paso 6: Asociar el contacto a la llamada
+        # Paso 7: Asociar el contacto a la llamada
         new_call.contact_uuid = contact_to_update.uuid
         
-        # Paso 7: Guardar todo
+        # Paso 8: Guardar todo
         db.commit()
         
         logger.info(f"Llamada procesada exitosamente: {new_call.uuid}")
@@ -140,7 +168,7 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
 # ENDPOINT ADICIONAL PARA TESTING
 # ============================
 @router.post("/webhook/call/test")
-async def test_webhook(call_data: dict, db: Session = Depends(get_session)):
+async def test_webhook(call_data: dict, db: Session = Depends(get_db)):
     """
     Endpoint de prueba que usa el modelo Pydantic
     """
