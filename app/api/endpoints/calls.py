@@ -49,14 +49,12 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
         # Paso 2: Extraer datos de Aircall y mapear a nuestros campos
         try:
             data = call_data.get("data", {})
-            user = data.get("user", {})
             
             mapped_data = {
                 "call_id": str(data.get("id", "")),
                 "time_stamp": str(call_data.get("timestamp", "")),
                 "direction": str(data.get("direction", "")),
                 "direct_link": str(data.get("direct_link", "")),
-                "id_user": str(user.get("id", "")),
                 "phone_number": str(data.get("raw_digits", "")),
                 "status": str(data.get("status", ""))
             }
@@ -71,7 +69,7 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
             )
         
         # Paso 3: Validar campos requeridos
-        required_fields = ["call_id", "time_stamp", "direction", "direct_link", "id_user", "phone_number", "status"]
+        required_fields = ["call_id", "time_stamp", "direction", "direct_link", "phone_number", "status"]
         missing_fields = [field for field in required_fields if not mapped_data.get(field)]
         
         if missing_fields:
@@ -88,7 +86,6 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
             time_stamp=mapped_data["time_stamp"],
             direction=mapped_data["direction"],
             direct_link=mapped_data["direct_link"],
-            id_user=mapped_data["id_user"],
             phone_number=mapped_data["phone_number"],
             status=mapped_data["status"]
         )
