@@ -1,10 +1,10 @@
-from fastapi import FastAPI
+from fastapi import APIRouter
 from pydantic import BaseModel, EmailStr
 import datetime
 from email.message import EmailMessage
 import aiosmtplib
 
-app = FastAPI()
+router = APIRouter()
 
 
 class LeadData(BaseModel):
@@ -62,7 +62,7 @@ async def send_email(xml_content: str):
     )
 
 
-@app.post("/webhook/lead")
+@router.post("/webhook/lead")
 async def receive_webhook(lead: LeadData):
     xml = build_adf_xml(lead)
     await send_email(xml)
