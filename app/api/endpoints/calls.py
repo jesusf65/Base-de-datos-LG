@@ -52,8 +52,8 @@ async def receive_webhook(request: Request):
     # Configurar y enviar el correo
     message = EmailMessage()
     message["Subject"] = "Lead Submission"
-    message["From"] = "tucorreo@gmail.com"
-    message["To"] = "dev@leadgrowthco.com"
+    message["From"] = "dev@leadgrowthco.com"
+    message["To"] = "luis1233210e@gmail.com"
     message.set_content(adf_xml)
 
     # Enviar email (Gmail SMTP)
@@ -61,8 +61,8 @@ async def receive_webhook(request: Request):
         message,
         hostname="smtp.gmail.com",
         port=465,
-        username="tucorreo@gmail.com",
-        password="TU_APP_PASSWORD",  # Usa una App Password si tienes 2FA
+        username="dev@leadgrowthco.com",
+        password="eeth brok amri kitb",  # Usa una App Password si tienes 2FA
         use_tls=True
     )
     print("📨 Lead enviado por correo exitosamente.")
