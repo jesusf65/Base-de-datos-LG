@@ -53,7 +53,7 @@ async def receive_webhook(request: Request):
     message = EmailMessage()
     message["Subject"] = "Lead Submission"
     message["From"] = "dev@leadgrowthco.com"
-    message["To"] = "luis1233210e@gmail.com"
+    message["To"] = "Strategy@leadgrowthco.com"
     message.set_content(adf_xml)
 
     # Enviar email (Gmail SMTP)
