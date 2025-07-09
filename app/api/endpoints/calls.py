@@ -65,7 +65,5 @@ async def receive_webhook(request: Request):
         password="TU_APP_PASSWORD",  # Usa una App Password si tienes 2FA
         use_tls=True
     )
-
     print("📨 Lead enviado por correo exitosamente.")
-
     return {"status": "ok", "message": "Lead enviado correctamente a AutoRaptor"}
