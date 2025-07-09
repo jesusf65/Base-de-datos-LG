@@ -9,3 +9,6 @@ httpx
 requests
 alembic
 tenacity
+python-multipart
+aiosmtplib
+email-validator

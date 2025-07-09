@@ -5,9 +5,9 @@ from app.api.api import api_router
 
 def create_application():
     application = FastAPI(
-        title="GHL to MyDB",
+        title="GHL to Gmail",
         version="0.0.1",
-        description="Este servicio permite la importacion de datos de contactos de GHL a una base de datos MySQL.",
+        description="Este servicio permite la importacion de datos de contactos de GHL a Gmail.",
         docs_url="/docs", 
         swagger_ui_parameters={
             "defaultModelsExpandDepth": -1, 
