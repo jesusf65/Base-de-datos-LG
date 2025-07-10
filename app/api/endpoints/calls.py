@@ -67,6 +67,13 @@ async def receive_webhook(request: Request):
         <email>{email}</email>
         <phone type="voice">{phone}</phone>
       </contact>
+      <address type="home">
+        <street>LeadGrowth</street>
+        <city>Doral</city>
+        <region>FL</region>
+        <postalcode>33166</postalcode>
+        <country>US</country>
+      </address>
     </customer>
     <provider>
       <name>{dealer_name}</name>
@@ -74,7 +81,8 @@ async def receive_webhook(request: Request):
     </provider>
     <vehicle>
       <comments>
-{comment_text}
+        <comment>{comment_text}</comment>
+        <comment>Lead enviado desde LeadGrowth</comment>
       </comments>
     </vehicle>
   </prospect>
