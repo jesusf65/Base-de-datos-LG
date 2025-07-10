@@ -47,7 +47,11 @@ async def receive_webhook(request: Request):
     if credit:
         comments.append(f"Situación crediticia actual: {credit[0]}")
 
-    comment_text = "\n".join(comments) if comments else "Sin información adicional."
+    if comments:
+        comments.append("Enviado desde LeadGrowth")
+        comment_text = "\n".join(comments)
+    else:
+        comment_text = "Enviado desde LeadGrowth"
 
     # Construir ADF XML
     adf_xml = f"""<?xml version="1.0" encoding="utf-8"?>
