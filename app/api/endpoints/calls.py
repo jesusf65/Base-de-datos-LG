@@ -13,20 +13,33 @@ async def receive_webhook(request: Request):
     print("📥 Webhook recibido:")
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-    # Extraer datos principales
+    # Extraer campos del payload
     first_name = payload.get("first_name", "")
     last_name = payload.get("last_name", "")
     email = payload.get("email", "")
     phone = payload.get("phone", "")
     created_at = payload.get("date_created", datetime.datetime.utcnow().isoformat())
-
     location = payload.get("location", {})
     dealer_name = location.get("name", "SuperAutos Miami")
+
+    # Variables de interés
+    down_payment_en = payload.get("Do you have at least $1,500 for the down payment?")
+    ssn_info = payload.get("Tienes Social Security y cuenta bancaria ?")
+    credit_situation = payload.get("How would you describe your current credit situation?")
+
+    # Modificar nombres si existen datos
+    if down_payment_en and isinstance(down_payment_en, list) and down_payment_en[0]:
+        first_name += f" dp={down_payment_en[0]}"
+
+    if ssn_info or (credit_situation and isinstance(credit_situation, list) and credit_situation[0]):
+        if ssn_info:
+            last_name += f" ssn_info={ssn_info}"
+        if credit_situation and credit_situation[0]:
+            last_name += f" cs={credit_situation[0]}"
 
     # Construcción de comentarios personalizados
     extra_comments = []
 
-    down_payment_en = payload.get("Do you have at least $1,500 for the down payment?")
     if down_payment_en and isinstance(down_payment_en, list):
         extra_comments.append(f"¿Tiene al menos $1,500 de entrada?: {down_payment_en[0]}")
 
@@ -34,18 +47,15 @@ async def receive_webhook(request: Request):
     if down_payment_es:
         extra_comments.append(f"Tiene $1,500 de entrada: {down_payment_es}")
 
-    ssn_info = payload.get("Tienes Social Security y cuenta bancaria ?")
     if ssn_info:
         extra_comments.append(f"¿Tiene SSN y cuenta bancaria?: {ssn_info}")
 
-    credit_situation = payload.get("How would you describe your current credit situation?")
     if credit_situation and isinstance(credit_situation, list):
         extra_comments.append(f"Situación crediticia actual: {credit_situation[0]}")
 
-    # Comentarios combinados
     comment_text = "\n".join(extra_comments) if extra_comments else "Sin información adicional."
 
-    # Crear XML formato ADF
+    # Crear XML ADF
     adf_xml = f"""<?xml version="1.0" encoding="utf-8"?>
 <adf>
   <prospect>
@@ -64,13 +74,13 @@ async def receive_webhook(request: Request):
     </provider>
     <vehicle>
       <comments>
-        {comment_text},"nota agregada Hardcode"
+{comment_text}
       </comments>
     </vehicle>
   </prospect>
 </adf>"""
 
-    # Enviar correo con el lead en formato ADF
+    # Enviar el email con ADF
     message = EmailMessage()
     message["Subject"] = "Lead Submission"
     message["From"] = "dev@leadgrowthco.com"
@@ -82,7 +92,7 @@ async def receive_webhook(request: Request):
         hostname="smtp.gmail.com",
         port=465,
         username="dev@leadgrowthco.com",
-        password="eeth brok amri kitb",  # Tu App Password
+        password="eeth brok amri kitb",  # App Password segura
         use_tls=True
     )
 
