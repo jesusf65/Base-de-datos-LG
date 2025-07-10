@@ -13,7 +13,7 @@ async def receive_webhook(request: Request):
     print("📥 Webhook recibido:")
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-    # Extraer campos del payload
+    # Datos base
     first_name = payload.get("first_name", "")
     last_name = payload.get("last_name", "")
     email = payload.get("email", "")
@@ -22,40 +22,34 @@ async def receive_webhook(request: Request):
     location = payload.get("location", {})
     dealer_name = location.get("name", "SuperAutos Miami")
 
-    # Variables de interés
-    down_payment_en = payload.get("Do you have at least $1,500 for the down payment?")
+    # Variables especiales para etiquetar nombre y apellido
+    dp = payload.get("Do you have at least $1,500 for the down payment?")
+    dp_str = f"dp={dp[0]}" if dp and isinstance(dp, list) else ""
+
     ssn_info = payload.get("Tienes Social Security y cuenta bancaria ?")
-    credit_situation = payload.get("How would you describe your current credit situation?")
+    ssn_str = f"ssn={ssn_info}" if ssn_info else ""
 
-    # Modificar nombres si existen datos
-    if down_payment_en and isinstance(down_payment_en, list) and down_payment_en[0]:
-        first_name += f" dp={down_payment_en[0]}"
+    credit = payload.get("How would you describe your current credit situation?")
+    cs_str = f"cs={credit[0]}" if credit and isinstance(credit, list) else ""
 
-    if ssn_info or (credit_situation and isinstance(credit_situation, list) and credit_situation[0]):
-        if ssn_info:
-            last_name += f" ssn_info={ssn_info}"
-        if credit_situation and credit_situation[0]:
-            last_name += f" cs={credit_situation[0]}"
+    # Ajustar nombres con etiquetas si aplica
+    if dp_str:
+        first_name += f" ({dp_str})"
+    if ssn_str or cs_str:
+        last_name += " (" + ", ".join(filter(None, [ssn_str, cs_str])) + ")"
 
-    # Construcción de comentarios personalizados
-    extra_comments = []
-
-    if down_payment_en and isinstance(down_payment_en, list):
-        extra_comments.append(f"¿Tiene al menos $1,500 de entrada?: {down_payment_en[0]}")
-
-    down_payment_es = payload.get("Tienes $1,500 de entrada ?")
-    if down_payment_es:
-        extra_comments.append(f"Tiene $1,500 de entrada: {down_payment_es}")
-
+    # Comentarios combinados para enviar
+    comments = []
+    if dp_str:
+        comments.append(f"¿Tiene al menos $1,500 de entrada?: {dp[0]}")
     if ssn_info:
-        extra_comments.append(f"¿Tiene SSN y cuenta bancaria?: {ssn_info}")
+        comments.append(f"¿Tiene SSN y cuenta bancaria?: {ssn_info}")
+    if credit:
+        comments.append(f"Situación crediticia actual: {credit[0]}")
 
-    if credit_situation and isinstance(credit_situation, list):
-        extra_comments.append(f"Situación crediticia actual: {credit_situation[0]}")
+    comment_text = "\n".join(comments) if comments else "Sin información adicional."
 
-    comment_text = "\n".join(extra_comments) if extra_comments else "Sin información adicional."
-
-    # Crear XML ADF
+    # Construir ADF XML
     adf_xml = f"""<?xml version="1.0" encoding="utf-8"?>
 <adf>
   <prospect>
@@ -67,13 +61,6 @@ async def receive_webhook(request: Request):
         <email>{email}</email>
         <phone type="voice">{phone}</phone>
       </contact>
-      <address type="home">
-        <street>LeadGrowth</street>
-        <city>Doral</city>
-        <region>FL</region>
-        <postalcode>33166</postalcode>
-        <country>US</country>
-      </address>
     </customer>
     <provider>
       <name>{dealer_name}</name>
@@ -81,14 +68,13 @@ async def receive_webhook(request: Request):
     </provider>
     <vehicle>
       <comments>
-        <comment>{comment_text}</comment>
-        <comment>Lead enviado desde LeadGrowth</comment>
+        {comment_text}
       </comments>
     </vehicle>
   </prospect>
 </adf>"""
 
-    # Enviar el email con ADF
+    # Enviar email
     message = EmailMessage()
     message["Subject"] = "Lead Submission"
     message["From"] = "dev@leadgrowthco.com"
@@ -100,7 +86,7 @@ async def receive_webhook(request: Request):
         hostname="smtp.gmail.com",
         port=465,
         username="dev@leadgrowthco.com",
-        password="eeth brok amri kitb",  # App Password segura
+        password="eeth brok amri kitb",
         use_tls=True
     )
 
