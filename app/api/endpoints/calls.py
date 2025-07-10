@@ -65,6 +65,9 @@ async def receive_webhook(request: Request):
         <email>{email}</email>
         <phone type="voice">{phone}</phone>
       </contact>
+      <comments>
+        {comment_text}
+      </comments>
     </customer>
     <provider>
       <name>{dealer_name}</name>
@@ -77,6 +80,7 @@ async def receive_webhook(request: Request):
     </vehicle>
   </prospect>
 </adf>"""
+
 
     # Enviar email
     message = EmailMessage()
