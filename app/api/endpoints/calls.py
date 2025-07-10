@@ -74,7 +74,7 @@ async def receive_webhook(request: Request):
     message = EmailMessage()
     message["Subject"] = "Lead Submission"
     message["From"] = "dev@leadgrowthco.com"
-    message["To"] = "luis1233210e@gmail.com"
+    message["To"] = "eleads-super-autos-miami-19355@app.autoraptor.com"
     message.set_content(adf_xml)
 
     await aiosmtplib.send(
