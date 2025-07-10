@@ -13,7 +13,6 @@ async def receive_webhook(request: Request):
     print("📥 Webhook recibido:")
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-    # Datos base
     first_name = payload.get("first_name", "")
     last_name = payload.get("last_name", "")
     email = payload.get("email", "")
@@ -22,7 +21,6 @@ async def receive_webhook(request: Request):
     location = payload.get("location", {})
     dealer_name = location.get("name", "SuperAutos Miami")
 
-    # Variables especiales para etiquetar nombre y apellido
     dp = payload.get("Do you have at least $1,500 for the down payment?")
     dp_str = f"dp={dp[0]}" if dp and isinstance(dp, list) else ""
 
@@ -32,13 +30,12 @@ async def receive_webhook(request: Request):
     credit = payload.get("How would you describe your current credit situation?")
     cs_str = f"cs={credit[0]}" if credit and isinstance(credit, list) else ""
 
-    # Ajustar nombres con etiquetas si aplica
     if dp_str:
         first_name += f" ({dp_str})"
     if ssn_str or cs_str:
         last_name += " (" + ", ".join(filter(None, [ssn_str, cs_str])) + ")"
 
-    # Comentarios combinados para enviar
+#comentarios a parte o sea de el formulario#
     comments = []
     if dp_str:
         comments.append(f"¿Tiene al menos $1,500 de entrada?: {dp[0]}")
@@ -53,7 +50,8 @@ async def receive_webhook(request: Request):
     else:
         comment_text = "Enviado desde LeadGrowth"
 
-    # Construir ADF XML
+#el xlm en adf para enviar
+
     adf_xml = f"""<?xml version="1.0" encoding="utf-8"?>
 <adf>
   <prospect>
@@ -61,6 +59,7 @@ async def receive_webhook(request: Request):
     <customer>
       <contact>
         <name part="first" type="individual">{first_name}</name>
+        <name part="middle" type="individual">from LeadGrowth</name>
         <name part="last" type="individual">{last_name}</name>
         <email>{email}</email>
         <phone type="voice">{phone}</phone>
@@ -81,8 +80,7 @@ async def receive_webhook(request: Request):
   </prospect>
 </adf>"""
 
-
-    # Enviar email
+#esto ya envia a gmail
     message = EmailMessage()
     message["Subject"] = "Lead Submission"
     message["From"] = "dev@leadgrowthco.com"
