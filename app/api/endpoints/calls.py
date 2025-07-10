@@ -64,7 +64,7 @@ async def receive_webhook(request: Request):
     </provider>
     <vehicle>
       <comments>
-        {comment_text}
+        {comment_text},"nota agregada Hardcode"
       </comments>
     </vehicle>
   </prospect>
