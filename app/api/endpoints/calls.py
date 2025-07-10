@@ -48,7 +48,7 @@ async def receive_webhook(request: Request):
     </vehicle>
   </prospect>
 </adf>"""
-
+    
     # Configurar y enviar el correo
     message = EmailMessage()
     message["Subject"] = "Lead Submission"
