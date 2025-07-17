@@ -4,7 +4,6 @@ import logging
 # Configura el logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
 # Crea un handler para console
 handler = logging.StreamHandler()
 handler.setLevel(logging.INFO)
@@ -52,7 +51,6 @@ async def receive_webhook(request: Request):
             logger.warning("⚠️ Estado de llamada desconocido")
         
         return {"status": "ok", "message": "llamada recibida"}
-    
     except Exception as e:
         logger.error(f"Error al procesar webhook: {str(e)}")
         return {"status": "error", "message": str(e)}
