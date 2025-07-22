@@ -148,7 +148,7 @@ async def webhook_call(request: Request, db: Session = Depends(get_session)):
         )
 
 @router.post("/webhook/lead")
-async def receive_webhook(request: Request):
+async def receive_webhook(request: Request, db: Session = Depends(get_session)):
     try:
         payload = await request.json()
         logger.info("📥 Webhook recibido:")
@@ -170,7 +170,6 @@ async def receive_webhook(request: Request):
                 direction=custom_data.get("direction")
             )
 
-            db: Session = get_session()
             db.add(call)
             db.commit()
             db.refresh(call)

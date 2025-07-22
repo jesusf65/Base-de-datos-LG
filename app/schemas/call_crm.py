@@ -3,7 +3,7 @@ from typing import Optional
 from pydantic import UUID4, BaseModel
 
 # Shared properties
-class CallModelBase(BaseModel):
+class CallCrmBase(BaseModel):
     user_from: str = None
     stamp_time: str = None
     status_call: str = None
@@ -12,12 +12,12 @@ class CallModelBase(BaseModel):
     direction: str = None
 
 # Properties to receive via API on creation
-class CallModelCreate(CallModelBase):
+class CallCrmCreate(CallCrmBase):
     pass
 
-class CallModelUpdate(CallModelBase):
+class CallCrmUpdate(CallCrmBase):
     pass
-class CallModelInDb(CallModelBase):
+class CallCrmInDb(CallCrmBase):
     uuid: UUID4
     created_at: datetime = None
     deleted_at: Optional[datetime] = None
@@ -26,5 +26,5 @@ class CallModelInDb(CallModelBase):
         from_attributes = True
 
 # Additional properties to return via API
-class CallModelSesion(CallModelBase):
+class CallCrmSesion(CallCrmBase):
     pass
