@@ -7,6 +7,7 @@ import logging
 from app.schemas.call_model import CallModelCreate
 from app.models.CallModel import CallModel
 from app.models.Contacts import Contact
+from app.models.CallCrm import CallCrm
 from app.controllers.call import call_controller
 from app.core.database import get_session
 
@@ -152,36 +153,58 @@ async def receive_webhook(request: Request):
         payload = await request.json()
         logger.info("📥 Webhook recibido:")
         logger.info(json.dumps(payload, indent=2, ensure_ascii=False))
-        
+
         call_data = payload.get('data', {})
-        
-        # Verificar si la llamada fue atendida
+        custom_data = payload.get('customData', {})  # 👈 extraemos customData
+
+        # Registrar customData si está presente
+        if custom_data:
+            logger.info("📞 Registrando llamada desde customData")
+
+            call = CallCrm(
+                user_from=custom_data.get("user_from"),
+                stamp_time=custom_data.get("stamp_time"),
+                status_call=custom_data.get("status_call"),
+                duration=custom_data.get("duration", ""),
+                contact_id=custom_data.get("contact_id"),
+                direction=custom_data.get("direction")
+            )
+
+            db: Session = get_session()
+            db.add(call)
+            db.commit()
+            db.refresh(call)
+            db.close()
+
+            logger.info(f"✅ Llamada registrada con UUID: {call.uuid}")
+        else:
+            logger.warning("⚠️ No se encontró 'customData' en el webhook")
+
+        # Análisis adicional (grabación, duración, etc.)
         if call_data.get('answered_at'):
             logger.info("✅ Llamada ATENDIDA")
-            
-            # Verificar posible grabación vacía
+
             duration = call_data.get('duration', 0)
             answered_at = call_data.get('answered_at', 0)
             ended_at = call_data.get('ended_at', 0)
-            
-            # Calcular tiempo real de conversación
+
             talk_time = ended_at - answered_at if all([answered_at, ended_at]) else 0
-            
-            if talk_time < 5:  # Menos de 5 segundos de conversación
-                logger.warning(f"⚠️ Grabación potencialmente vacía o corta. Duración: {talk_time}s")
-                
-            # Verificar si existe URL de grabación
+
+            if talk_time < 5:
+                logger.warning(f"⚠️ Grabación corta o vacía. Duración: {talk_time}s")
+
             if not call_data.get('recording'):
                 logger.error("❌ No se encontró URL de grabación")
-                
+
         elif call_data.get('missed_call_reason'):
             logger.warning(f"⛔ Llamada NO atendida: {call_data['missed_call_reason']}")
         else:
             logger.warning("⚠️ Estado de llamada desconocido")
-        
+
         return {"status": "ok", "message": "llamada recibida"}
+
     except Exception as e:
-        logger.error(f"Error al procesar webhook: {str(e)}")
+        logger.exception("❌ Error al procesar el webhook")
         return {"status": "error", "message": str(e)}
     
 @router.get("/webhook/call/health") #Para ver si está vivo
