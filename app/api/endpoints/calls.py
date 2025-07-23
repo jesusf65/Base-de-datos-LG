@@ -35,9 +35,12 @@ async def log_facebook_webhook(request: Request):
         
         # Intentar parsear JSON si existe
         try:
-            json_data = await request.json() if body else None
-        except:
+            json_data = await request.json()
+            body = str(json_data)
+        except Exception:
             json_data = None
+            body = await request.body()
+
         
         # Loggear toda la información recibida
         logger.info(f"\n{'='*40}\n"
