@@ -4,6 +4,7 @@ import json
 from datetime import datetime 
 import logging
 
+from app.schemas.call_crm import CallCrmCreate
 from app.schemas.call_model import CallModelCreate
 from app.models.CallModel import CallModel
 from app.models.Contacts import Contact
@@ -226,7 +227,7 @@ async def debug_aircall_webhook(request: Request):
         return {"error": str(e)}
 
 @router.post("/call_create", status_code=status.HTTP_201_CREATED)
-async def create_call(data: CallModelCreate, session: Session = Depends(get_session)):
+async def create_call(data: CallCrmCreate, session: Session = Depends(get_session)):
     try:
         calls = await call_controller.create_call(data=data, session=session)
         return calls
