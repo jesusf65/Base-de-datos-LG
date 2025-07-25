@@ -1,7 +1,7 @@
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from app.controllers.gohighlevel import obtener_contacto
+from app.controllers.gohighlevel import buscar_contacto_por_telefono
 from app.controllers.telnyx import hacer_llamada 
 from datetime import datetime
 import os
@@ -14,32 +14,26 @@ router = APIRouter()
 class LlamadaRequest(BaseModel):
     contact_id: str
 
-@router.post("/llamar-contacto")
-async def llamar_contacto(payload: LlamadaRequest):
-    contacto = await obtener_contacto(payload.contact_id)
-    if not contacto:
-        raise HTTPException(status_code=404, detail="Contacto no encontrado")
-
-    telefono = contacto.get("phone")
+@router.post("/llamar-por-telefono")
+async def llamar_por_telefono(payload: dict):
+    telefono = payload.get("telefono")
     if not telefono:
-        raise HTTPException(status_code=400, detail="El contacto no tiene número")
+        raise HTTPException(status_code=400, detail="Falta el número de teléfono")
 
+    contacto = await buscar_contacto_por_telefono(telefono)
+    if not contacto:
+        raise HTTPException(status_code=404, detail="No se encontró ningún contacto con ese número")
+
+    contact_id = contacto.get("id")
     resultado = await hacer_llamada(to_number=telefono)
+
     return {
         "status": "llamada iniciada",
+        "contact_id": contact_id,
         "telefono": telefono,
         "detalle": resultado
     }
 
-    
-@router.get("/webhook/call/health") #Para ver si está vivo
-async def health_check():
-
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "message": "Webhook funcionando correctamente"
-    }
 
 @router.post("/webhooks/aircall/debug", status_code=200)
 async def debug_aircall_webhook(request: Request):
