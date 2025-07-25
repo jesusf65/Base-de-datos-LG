@@ -30,7 +30,6 @@ async def llamar_por_telefono(req: TelefonoRequest):
         "detalle": resultado
     }
 
-
 @router.post("/webhooks/aircall/debug", status_code=200)
 async def debug_aircall_webhook(request: Request):
     try:

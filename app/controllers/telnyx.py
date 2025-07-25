@@ -15,7 +15,7 @@ TELNYX_FROM_NUMBER = os.getenv("TELNYX_FROM_NUMBER")
 async def hacer_llamada(to_number: str):
     url = "https://api.telnyx.com/v2/calls"
     headers = {
-        "Authorization": f"Bearer {TELNYX_API_KEY}",  # ✅ Correcto
+        "Authorization": f"Bearer {TELNYX_API_KEY}",  
         "Content-Type": "application/json"
     }
 
@@ -23,13 +23,13 @@ async def hacer_llamada(to_number: str):
         "connection_id": TELNYX_CONNECTION_ID,
         "to": to_number,
         "from": TELNYX_FROM_NUMBER,
-        "audio_url": "https://yourdomain.com/audio.mp3"  # Opcional
+        "audio_url": "https://yourdomain.com/audio.mp3"  
     }
 
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()  # Lanza error si es 4xx/5xx
+            response.raise_for_status() 
             return response.json()
 
     except httpx.HTTPStatusError as e:

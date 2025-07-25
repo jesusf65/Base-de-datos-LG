@@ -4,22 +4,15 @@ import logging
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/webhooks/telnyx")
-async def telnyx_webhook(request: Request):
+@router.post("/webhooks/telnyx", status_code=200)
+async def webhook_telnyx(request: Request):
     payload = await request.json()
-    logger.info(f"📞 Evento Telnyx recibido: {payload}")
-
     event_type = payload.get("data", {}).get("event_type")
-    call_control_id = payload.get("data", {}).get("payload", {}).get("call_control_id")
+    logger.info(f"Evento Telnyx: {event_type}")
 
-    # Aquí podrías reaccionar a eventos específicos
-    if event_type == "call.initiated":
-        logger.info(f"📞 Llamada iniciada - Call Control ID: {call_control_id}")
-    elif event_type == "call.answered":
-        logger.info(f"✅ Llamada respondida - Call Control ID: {call_control_id}")
+    if event_type == "call.answered":
+        logger.info("✅ La llamada fue contestada")
     elif event_type == "call.hangup":
-        logger.info(f"❌ Llamada finalizada - Call Control ID: {call_control_id}")
-    else:
-        logger.info(f"📡 Evento no manejado: {event_type}")
+        logger.info("📴 La llamada fue colgada")
 
     return {"status": "ok"}
