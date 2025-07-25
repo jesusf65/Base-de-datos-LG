@@ -1,71 +1,36 @@
-from fastapi import APIRouter, Request, HTTPException
-from datetime import datetime 
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+from app.controllers.gohighlevel import obtener_contacto
+from app.controllers.telnyx import hacer_llamada 
+from datetime import datetime
+import os
 import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from fastapi import Request, HTTPException
-from fastapi.responses import JSONResponse, PlainTextResponse
-import logging
+class LlamadaRequest(BaseModel):
+    contact_id: str
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
+@router.post("/llamar-contacto")
+async def llamar_contacto(payload: LlamadaRequest):
+    contacto = await obtener_contacto(payload.contact_id)
+    if not contacto:
+        raise HTTPException(status_code=404, detail="Contacto no encontrado")
 
-@router.api_route("/webhook/call", methods=["GET", "POST"])
-async def log_facebook_webhook(request: Request):
-    """
-    Endpoint simple para loggear todo lo que envía Facebook
-    """
-    try:
-        # Obtener método HTTP
-        method = request.method
-        
-        # Obtener headers
-        headers = dict(request.headers)
-        
-        # Obtener parámetros de query (para GET)
-        query_params = dict(request.query_params)
-        
-        # Obtener body (para POST)
-        body = await request.body()
-        
-        # Intentar parsear JSON si existe
-        try:
-            json_data = await request.json()
-            body = str(json_data)
-        except Exception:
-            json_data = None
-            body = await request.body()
+    telefono = contacto.get("phone")
+    if not telefono:
+        raise HTTPException(status_code=400, detail="El contacto no tiene número")
 
-        
-        # Loggear toda la información recibida
-        logger.info(f"\n{'='*40}\n"
-                   f"Método: {method}\n"
-                   f"Headers: {headers}\n"
-                   f"Query Params: {query_params}\n"
-                   f"Body (raw): {body}\n"
-                   f"Body (JSON): {json_data}\n"
-                   f"{'='*40}")
-        
-        # Si es una solicitud GET de verificación
-        if method == "GET" and "hub.mode" in query_params:
-            verify_token = "fb_wh_verify_7Xq9!pL2$zR#mY4v"  # Cambiar por tu token real
-            if query_params.get("hub.verify_token") == verify_token:
-                challenge = query_params.get("hub.challenge", "")
-                return PlainTextResponse(content=challenge)
-            else:
-                raise HTTPException(status_code=403, detail="Token de verificación incorrecto")
-        
-        # Para solicitudes POST, simplemente responder OK
-        return JSONResponse(content={"status": "received"})
-    
-    except Exception as e:
-        logger.error(f"Error procesando webhook: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
+    resultado = await hacer_llamada(to_number=telefono)
+    return {
+        "status": "llamada iniciada",
+        "telefono": telefono,
+        "detalle": resultado
+    }
+
     
 @router.get("/webhook/call/health") #Para ver si está vivo
 async def health_check():
