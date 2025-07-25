@@ -9,7 +9,7 @@ load_dotenv(dotenv_path=env_path)
 
 
 class Settings(BaseSettings):
-    API_KEY_CRM: str = os.environ.get("API_KEY_CRM")
+    GHL_API_KEY: str = os.environ.get("GHL_API_KEY")
 
     POSTGRES_USER: str = os.environ.get("PGUSER")  
     POSTGRES_PASSWORD: str = os.environ.get("PGPASSWORD")  
