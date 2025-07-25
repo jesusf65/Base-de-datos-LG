@@ -8,9 +8,9 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-TELNYX_API_KEY = "KEY0198431E52A8E18011D46DA3FA847F50_MwvbUsfu3dFgdUMjVkYt69"
-TELNYX_CONNECTION_ID = "2742320010645997131"
-TELNYX_FROM_NUMBER = "+13053150784" 
+TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
+TELNYX_CONNECTION_ID = os.getenv("TELNYX_CONNECTION_ID")
+TELNYX_FROM_NUMBER = os.getenv("TELNYX_FROM_NUMBER")
 
 async def hacer_llamada(to_number: str):
     url = "https://api.telnyx.com/v2/calls"
