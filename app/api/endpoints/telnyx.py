@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Body
 import logging
 import json
 
@@ -8,33 +8,23 @@ logger = logging.getLogger(__name__)
 @router.post("/webhooks/telnyx", status_code=200)
 async def telnyx_webhook(request: Request):
     try:
-        # 1. Capturar datos en crudo y headers
+        # 1. Leer cuerpo en crudo (ignorando Content-Type)
         raw_body = await request.body()
-        headers = dict(request.headers)
         
-        # 2. Loggear información para diagnóstico
-        logger.info(f"\n📝 Headers recibidos: {headers}")
-        logger.info(f"\n📦 Cuerpo en crudo: {raw_body.decode('utf-8')}")
-
-        # 3. Parsear el JSON manualmente
+        # 2. Decodificar como JSON manualmente
         try:
             payload = json.loads(raw_body)
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Error decodificando JSON: {str(e)}")
-            raise HTTPException(status_code=400, detail="JSON inválido")
+            logger.error(f"❌ JSON inválido: {raw_body.decode()}")
+            raise HTTPException(400, detail="Cuerpo no es JSON válido")
 
-        # 5. Procesar el evento
-        event_type = payload.get("data", {}).get("event_type")
-        logger.info(f"\n🎉 Evento recibido: {event_type}")
+        # 3. Procesar el evento
+        logger.info(f"✅ Webhook recibido: {payload}")
+        event_type = payload.get("data", {}).get("event_type", "desconocido")
+        logger.info(f"📌 Tipo de evento: {event_type}")
         
-        # Aquí tu lógica de negocio...
-        # Ejemplo: if event_type == "call.answered": ...
+        return {"status": "ok"}
 
-        return {"status": "webhook procesado"}
-
-    except HTTPException:
-        raise  # Re-lanzar excepciones controladas
-    
     except Exception as e:
-        logger.error(f"🔥 Error inesperado: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
+        logger.error(f"🔥 Error: {str(e)}")
+        raise HTTPException(500, detail="Error interno")
