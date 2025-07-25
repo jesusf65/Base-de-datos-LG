@@ -15,7 +15,7 @@ TELNYX_FROM_NUMBER = os.getenv("TELNYX_FROM_NUMBER")
 async def hacer_llamada(to_number: str):
     url = "https://api.telnyx.com/v2/calls"
     headers = {
-        "Telnyx-Api-Key": TELNYX_API_KEY,  # Header corregido
+        "Authorization": f"Bearer {TELNYX_API_KEY}",  # ✅ Correcto
         "Content-Type": "application/json"
     }
 
