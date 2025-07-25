@@ -31,7 +31,7 @@ async def hacer_llamada(to_number: str):
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()  # Lanza error si es 4xx/5xx
             return response.json()
-            
+
     except httpx.HTTPStatusError as e:
         logger.error(f"Error de Telnyx: {e.response.text}")
         raise HTTPException(
