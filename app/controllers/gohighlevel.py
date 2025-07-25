@@ -20,12 +20,14 @@ async def buscar_contacto_por_telefono(telefono: str):
     async with httpx.AsyncClient() as client:
         response = await client.get(url, headers=HEADERS, params=params)
 
-    if response.status_code == 200:
-        data = response.json()
-        contactos = data.get("contacts", [])
-        if contactos:
-            return contactos[0]  # Puedes adaptar para devolver todos si prefieres
+    print(f"📞 Lookup GHL status: {response.status_code}")
+    print(f"🔍 Lookup GHL response: {response.text}")
+
+    if response.status_code != 200:
         return None
-    else:
-        print(f"Error al buscar contacto: {response.status_code}, {response.text}")
-        return None
+
+    data = response.json()
+    contactos = data.get("contacts", [])
+    if contactos and isinstance(contactos, list):
+        return contactos[0]  # Devuelve el primero
+    return None
