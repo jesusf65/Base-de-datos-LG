@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException
 import logging
 import json
-from telnyx import webhooks  # Opcional para validación de firma
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
