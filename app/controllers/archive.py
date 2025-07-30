@@ -26,10 +26,7 @@ def build_adf_xml(data: Dict[str, str]) -> str:
 def get_lead_email_recipients():
     """Retorna la lista de emails donde se deben enviar los leads"""
     return [
-        "eleads-super-autos-miami-19355@app.autoraptor.com",
-        "diazrenep@gmail.com",
-        "diazrenet@gmail.com",
-        "496a49324e7a59324e7a6369@pcmailhook.com"
+        "luis1233210e@gmail.com"
     ]
 
 
