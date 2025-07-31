@@ -1,41 +1,24 @@
-
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
-from app.controllers.gohighlevel import buscar_contacto_por_telefono
-from app.controllers.telnyx import hacer_llamada 
-import os
-import logging
-
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, Request
+import json
+import datetime
+from app.controllers.parse import parse_lead_payload
+from app.controllers.archive import build_adf_xml
+from app.controllers.email import send_lead_to_multiple_recipients
 
 router = APIRouter()
 
-class TelefonoRequest(BaseModel):
-    telefono: str
+@router.post("/webhook/lead")
+async def receive_webhook(request: Request):
+    payload = await request.json()
+    print("📥 Webhook recibido:")
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-@router.post("/llamar-por-telefono")
-async def llamar_por_telefono(req: TelefonoRequest):
-    contacto = await buscar_contacto_por_telefono(req.telefono)
+    if "date_created" not in payload:
+        payload["date_created"] = datetime.datetime.utcnow().isoformat()
 
-    if not contacto:
-        raise HTTPException(status_code=404, detail="No se encontró ningún contacto con ese número")
+    lead_data = parse_lead_payload(payload)
+    adf_xml = build_adf_xml(lead_data)
+    await send_lead_to_multiple_recipients(adf_xml)
 
-    contact_id = contacto.get("id")
-    resultado = await hacer_llamada(to_number=req.telefono)
-
-    return {
-        "status": "llamada iniciada",
-        "contact_id": contact_id,
-        "telefono": req.telefono,
-        "detalle": resultado
-    }
-
-@router.post("/webhooks/aircall/debug", status_code=200)
-async def debug_aircall_webhook(request: Request):
-    try:
-        original_json = await request.json()
-        logger.info(f"DEBUG - Full webhook data: {original_json}")
-        return {"received": original_json}
-    except Exception as e:
-        logger.error(f"DEBUG - Error: {str(e)}")
-        return {"error": str(e)}
+    print("📨 Lead enviado por correo exitosamment")
+    return {"status": "ok", "message": "Lead enviado correctamente a todos los destinatarios"}
