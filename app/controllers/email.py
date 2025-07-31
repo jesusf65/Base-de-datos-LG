@@ -2,7 +2,7 @@ import httpx
 import os
 import asyncio
 from app.controllers.archive import get_lead_email_recipients
-RESEND_API_KEY = "re_fWWhGrvz_6FKcjF9Dvy2uGsoFxSTYyspA"
+RESEND_API_KEY = "RESEND_API_KEY"  # 👈 Reemplaza con tu clave de API de Resend
   # Asegúrate de definirla en tu entorno o .env
 
 async def send_adf_email(adf_xml: str, to_email: str):
