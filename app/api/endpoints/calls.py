@@ -52,24 +52,22 @@ async def receive_webhook(request: Request):
         # Procesamiento de fechas
         timing_data = {
             "contact_creation": None,
+            "contact_id": data.get('contact_id'),
             "first_call": None,
             "time_between": None,
             "call_count": data.get('Número de veces contactado', 0),
             "last_contact": data.get('Última vez contactado')
         }
 
-        # Obtener posibles campos de fecha de creación
         creation_str = (data.get('date_created') or 
                       data.get('Fecha de creación') or 
                       data.get('create date'))
         
         creation_date = parse_date(creation_str)
         
-        # Obtener fecha de primera llamada
         first_call_str = data.get('Fecha/Hora primer llamada')
         first_call_date = parse_date(first_call_str)
         
-        # Calcular diferencia si tenemos ambas fechas
         if creation_date and first_call_date:
             diferencia = first_call_date - creation_date
             timing_data.update({
