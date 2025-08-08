@@ -1,24 +1,27 @@
 from fastapi import APIRouter, Request
 import json
-import datetime
-from app.controllers.parse import parse_lead_payload
-from app.controllers.archive import build_adf_xml
-from app.controllers.email import send_lead_to_multiple_recipients
+from logging import getLogger
 
 router = APIRouter()
 
 @router.post("/webhook")
 async def receive_webhook(request: Request):
-    payload = await request.json()
-    print("📥 Webhook recibido:")
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    logger = getLogger("webhook_logger")
+    
+    try:
+        # Read the request body
+        body = await request.body()
+        data = json.loads(body)
 
-    if "date_created" not in payload:
-        payload["date_created"] = datetime.datetime.utcnow().isoformat()
+        # Log the received data
+        logger.info(f"Received webhook data: {data}")
 
-    lead_data = parse_lead_payload(payload)
-    adf_xml = build_adf_xml(lead_data)
-    await send_lead_to_multiple_recipients(adf_xml)
 
-    print("📨 Lead enviado por correo exitosamment")
-    return {"status": "ok", "message": "Lead enviado correctamente a todos los destinatarios"}
+        return {"status": "success", "message": "Webhook received successfully"}
+
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON received")
+        return {"status": "error", "message": "Invalid JSON format"}, 400
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        return {"status": "error", "message": str(e)}, 500  
