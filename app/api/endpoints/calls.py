@@ -99,6 +99,7 @@ async def receive_webhook(request: Request):
             "message": "Webhook processed successfully",
             "contact_id": data.get('contact_id'),
             "contact_name": data.get('full_name'),
+            "contact_create": data.get('date_created'),
             "timing_data": timing_data,
             "metadata": {
                 "source": data.get('contact_source'),
