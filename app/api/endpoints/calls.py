@@ -1,13 +1,20 @@
 from fastapi import APIRouter, Request
 import json
-from logging import getLogger
+import logging
+
+# Configura el logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+logger = logging.getLogger("webhook_logger")
 
 router = APIRouter()
 
 @router.post("/webhook")
-async def receive_webhook(request: Request):
-    logger = getLogger("webhook_logger")
-    
+async def receive_webhook(request: Request):    
     try:
         # Read the request body
         body = await request.body()
@@ -16,7 +23,6 @@ async def receive_webhook(request: Request):
         # Log the received data
         logger.info(f"Received webhook data: {data}")
 
-
         return {"status": "success", "message": "Webhook received successfully"}
 
     except json.JSONDecodeError:
@@ -24,4 +30,4 @@ async def receive_webhook(request: Request):
         return {"status": "error", "message": "Invalid JSON format"}, 400
     except Exception as e:
         logger.error(f"An error occurred: {e}")
-        return {"status": "error", "message": str(e)}, 500  
+        return {"status": "error", "message": str(e)}, 500
