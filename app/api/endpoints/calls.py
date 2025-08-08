@@ -61,7 +61,10 @@ async def receive_webhook(request: Request):
 
         creation_str = (data.get('date_created') or 
                       data.get('Fecha de creación') or 
-                      data.get('create date'))
+                      data.get('create date') or
+                        data.get('contact_id'))
+        
+                    
         
         creation_date = parse_date(creation_str)
         
