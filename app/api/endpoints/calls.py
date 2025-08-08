@@ -65,7 +65,6 @@ async def receive_webhook(request: Request):
             # Calcular diferencia si tenemos ambas fechas
             if create_date and first_call_date:
                 diferencia = first_call_date - create_date
-                timing_data["time_between"] = str(diferencia)
                 
                 logger.info(f"Fecha creación contacto: {create_date}")
                 logger.info(f"Fecha/Hora primera llamada: {first_call_date}")
