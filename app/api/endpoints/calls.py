@@ -7,7 +7,7 @@ from app.controllers.email import send_lead_to_multiple_recipients
 
 router = APIRouter()
 
-@router.post("/webhook/lead")
+@router.post("/webhook")
 async def receive_webhook(request: Request):
     payload = await request.json()
     print("📥 Webhook recibido:")
