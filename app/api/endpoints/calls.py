@@ -40,7 +40,9 @@ async def receive_webhook(request: Request):
         timing_data = {
             "contact_creation": None,
             "first_call": None,
-            "time_between": None
+            "time_between": None,
+            "contact_id": data.get('contact_id')
+            
         }
 
         # Formatos de fecha a probar
@@ -54,22 +56,24 @@ async def receive_webhook(request: Request):
         try:
             # Procesar fecha de creación del contacto
             creation_str = data.get('date_created') or data.get('Fecha de creación') or data.get('create date')
-            creation_date = parse_date(creation_str, date_formats)
+            create_date = parse_date(creation_str, date_formats)
             
             # Procesar fecha de primera llamada
             first_call_str = data.get('Fecha/Hora primer llamada')
             first_call_date = parse_date(first_call_str, date_formats)
             
             # Calcular diferencia si tenemos ambas fechas
-            if creation_date and first_call_date:
-                diferencia = first_call_date - creation_date
+            if create_date and first_call_date:
+                diferencia = first_call_date - create_date
                 timing_data["time_between"] = str(diferencia)
                 
-                logger.info(f"Fecha creación contacto: {creation_date}")
+                logger.info(f"Fecha creación contacto: {create_date}")
                 logger.info(f"Fecha/Hora primera llamada: {first_call_date}")
                 logger.info(f"Tiempo entre creación y primera llamada: {diferencia}")
+                contact_id = data.get('contact_id')
+                logger.info(f"contact_id: {contact_id}")
             else:
-                if not creation_date:
+                if not create_date:
                     logger.warning("No se pudo obtener fecha de creación válida")
                 if not first_call_date:
                     logger.warning("No se pudo obtener fecha de primera llamada válida")
@@ -79,7 +83,7 @@ async def receive_webhook(request: Request):
 
         # Actualizar datos de timing para la respuesta
         timing_data.update({
-            "contact_creation": creation_date.isoformat() if creation_date else None,
+            "contact_creation": create_date.isoformat() if create_date else None,
             "first_call": first_call_date.isoformat() if first_call_date else None
         })
 
