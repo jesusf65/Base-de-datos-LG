@@ -1,6 +1,4 @@
 from datetime import datetime
-from app.utils.date_parser import parse_date
-from app.schemas.models import TimingData, WebhookResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import httpx
@@ -14,10 +12,19 @@ class TimingData:
         self.time_between_minutes = None
         self.contact_id = None
 
+class GHLContactPayload(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    name: Optional[str] = None
+    customFields: Optional[Dict[str, Any]] = None
+
 class WebhookService:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
-        self.leadconnector_webhook_url = os.getenv("LEADCONNECTOR_WEBHOOK_URL")
+        self.leadconnector_webhook_url = os.getenv(
+            "LEADCONNECTOR_WEBHOOK_URL",
+            "https://services.leadconnectorhq.com/hooks/k7RoeQKT06Odv8RoFOjg/webhook-trigger/9ed9eac2-24d4-4fee-98d8-6009d2c452e2"
+        )
         
         # Formatos de fecha soportados
         self.date_formats = [
@@ -92,7 +99,10 @@ class WebhookService:
 
     async def send_to_leadconnector(self, payload: Dict) -> Optional[Dict]:
         """Envía datos al webhook de LeadConnector"""
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Version": "2021-07-28"
+        }
         
         try:
             async with httpx.AsyncClient() as client:
@@ -104,84 +114,29 @@ class WebhookService:
                 )
                 response.raise_for_status()
                 return response.json()
-        except Exception as e:
-            self.logger.error(f"Error enviando a LeadConnector: {str(e)}")
-            return None
-
-    def prepare_leadconnector_payload(self, data: Dict, timing_data: TimingData) -> Dict:
-        """Prepara payload para LeadConnector"""
-        return {
-            "event": "call_activity",
-            "contact": {
-                "id": timing_data.contact_id,
-                "custom_fields": {
-                    "first_call_time": timing_data.first_call,
-                    "call_duration_min": timing_data.time_between_minutes,
-                    "total_calls": data.get('Número de veces contactado', 0)
-                }
-            },
-            "metadata": {
-                "processed_at": datetime.utcnow().isoformat()
-            }
-        }
-
-class GHLContactPayload(BaseModel):
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    name: Optional[str] = None
-    customFields: Optional[Dict[str, Any]] = None
-
-
-class WebhookService:
-    def __init__(self, logger: logging.Logger):
-        self.logger = logger
-        self.leadconnector_webhook_url = os.getenv("LEADCONNECTOR_WEBHOOK_URL", 
-                                    "https://services.leadconnectorhq.com/hooks/k7RoeQKT06Odv8RoFOjg/webhook-trigger/9ed9eac2-24d4-4fee-98d8-6009d2c452e2")
-
-    async def send_to_leadconnector(self, payload: dict) -> Optional[dict]:
-        """
-        Envía datos al webhook específico de LeadConnector
-        """
-        headers = {
-            "Content-Type": "application/json",
-            "Version": "2021-07-28"  # Versión de API recomendada
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.leadconnector_webhook_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=10.0
-                )
-                response.raise_for_status()
-                return response.json()
         except httpx.HTTPStatusError as e:
-            self.logger.error(f"Error de HTTP al enviar a LeadConnector: {e.response.text}")
+            self.logger.error(f"Error HTTP al enviar a LeadConnector: {e.response.text}")
         except Exception as e:
             self.logger.error(f"Error inesperado al enviar a LeadConnector: {str(e)}")
         return None
 
-    def prepare_leadconnector_payload(self, original_data: dict, timing_data: dict) -> dict:
-        """
-        Prepara el payload específico para LeadConnector HQ
-        """
+    def prepare_leadconnector_payload(self, data: Dict, timing_data: TimingData) -> Dict:
+        """Prepara payload para LeadConnector"""
         return {
-            "event_type": "contact_activity",  # Tipo de evento personalizado
+            "event_type": "contact_activity",
             "contact": {
-                "email": original_data.get("email"),
-                "phone": original_data.get("phone"),
-                "name": original_data.get("name"),
+                "email": data.get("email"),
+                "phone": data.get("phone"),
+                "name": data.get("name"),
                 "custom_fields": {
-                    "contact_creation": timing_data.get("contact_creation"),
-                    "first_call_time": timing_data.get("first_call"),
-                    "time_between_minutes": timing_data.get("time_between_minutes"),
-                    "call_count": original_data.get("Número de veces contactado", 0)
+                    "contact_creation": timing_data.contact_creation,
+                    "first_call_time": timing_data.first_call,
+                    "time_between_minutes": timing_data.time_between_minutes,
+                    "call_count": data.get('Número de veces contactado', 0)
                 }
             },
             "metadata": {
                 "source": "fastapi_webhook",
-                "original_data": original_data  # Opcional: enviar datos originales
+                "processed_at": datetime.utcnow().isoformat()
             }
         }
