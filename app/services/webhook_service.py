@@ -23,7 +23,7 @@ class WebhookService:
             first_call_date = parse_date(first_call_str)
             
             if create_date and first_call_date:
-                diferencia = first_call_date - create_date
+                diferencia = create_date - first_call_date
                 diferencia_minutos = diferencia.total_seconds() / 60
                 
                 self.logger.info(f"Fecha creación contacto: {create_date}")
