@@ -7,57 +7,123 @@ import httpx
 import logging
 import os
 
+class TimingData:
+    def __init__(self):
+        self.contact_creation = None
+        self.first_call = None
+        self.time_between_minutes = None
+        self.contact_id = None
 
 class WebhookService:
-    def __init__(self, logger):
+    def __init__(self, logger: logging.Logger):
         self.logger = logger
+        self.leadconnector_webhook_url = os.getenv("LEADCONNECTOR_WEBHOOK_URL")
+        
+        # Formatos de fecha soportados
+        self.date_formats = [
+            '%Y-%m-%dT%H:%M:%S.%fZ',
+            '%m/%d/%Y %H:%M',
+            '%Y-%m-%d',
+            '%m/%d/%Y'
+        ]
 
-    def process_timing_data(self, data: dict) -> TimingData:
-        timing_data = TimingData(
-            contact_creation=None,
-            first_call=None,
-            time_between_minutes=None,
-            contact_id=data.get('contact_id')
-        )
+    def parse_date(self, date_str: str) -> Optional[datetime]:
+        """Parsear fecha con múltiples formatos"""
+        if not date_str:
+            return None
+            
+        for fmt in self.date_formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        return None
+
+    def process_timing_data(self, data: Dict) -> TimingData:
+        """Procesa los datos de tiempo del webhook"""
+        timing_data = TimingData()
+        timing_data.contact_id = data.get('contact_id')
 
         try:
-            # Procesar fechas
+            # Procesar fecha de creación
             creation_str = data.get('date_created') or data.get('Fecha de creación') or data.get('create date')
-            create_date = parse_date(creation_str)
+            create_date = self.parse_date(creation_str)
             
+            # Procesar fecha de primera llamada
             first_call_str = data.get('Fecha/Hora primer llamada')
-            first_call_date = parse_date(first_call_str)
+            first_call_date = self.parse_date(first_call_str)
             
+            # Calcular diferencia
             if create_date and first_call_date:
-                diferencia = create_date - first_call_date
+                diferencia = first_call_date - create_date
                 diferencia_minutos = diferencia.total_seconds() / 60
                 
                 self.logger.info(f"Fecha creación contacto: {create_date}")
                 self.logger.info(f"Fecha/Hora primera llamada: {first_call_date}")
-                self.logger.info(f"Tiempo en minutos: {diferencia_minutos:.2f}")
-                self.logger.info(f"contact_id: {data.get('contact_id')}")
+                self.logger.info(f"Tiempo entre creación y primera llamada (minutos): {diferencia_minutos:.2f}")
                 
                 timing_data.contact_creation = create_date.isoformat()
                 timing_data.first_call = first_call_date.isoformat()
                 timing_data.time_between_minutes = round(diferencia_minutos, 2)
             else:
                 if not create_date:
-                    self.logger.warning("No se pudo obtener fecha de creación válida")
+                    self.logger.warning("Fecha de creación no encontrada")
                 if not first_call_date:
-                    self.logger.warning("No se pudo obtener fecha de primera llamada válida")
-                
-        except Exception as date_error:
-            self.logger.error(f"Error procesando fechas: {date_error}", exc_info=True)
-
+                    self.logger.warning("Fecha de primera llamada no encontrada")
+                    
+        except Exception as e:
+            self.logger.error(f"Error procesando fechas: {str(e)}", exc_info=True)
+            
         return timing_data
 
-    def create_response(self, timing_data: TimingData, call_count: int) -> WebhookResponse:
-        return WebhookResponse(
-            status="success",
-            message="Webhook received successfully",
-            timing_data=timing_data,
-            call_count=call_count
-        )
+    def create_response(self, timing_data: TimingData, call_count: int) -> Dict:
+        """Crea la respuesta estructurada"""
+        return {
+            "status": "success",
+            "message": "Webhook processed successfully",
+            "timing_data": {
+                "contact_creation": timing_data.contact_creation,
+                "first_call": timing_data.first_call,
+                "time_between_minutes": timing_data.time_between_minutes,
+                "contact_id": timing_data.contact_id
+            },
+            "call_count": call_count
+        }
+
+    async def send_to_leadconnector(self, payload: Dict) -> Optional[Dict]:
+        """Envía datos al webhook de LeadConnector"""
+        headers = {"Content-Type": "application/json"}
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.leadconnector_webhook_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            self.logger.error(f"Error enviando a LeadConnector: {str(e)}")
+            return None
+
+    def prepare_leadconnector_payload(self, data: Dict, timing_data: TimingData) -> Dict:
+        """Prepara payload para LeadConnector"""
+        return {
+            "event": "call_activity",
+            "contact": {
+                "id": timing_data.contact_id,
+                "custom_fields": {
+                    "first_call_time": timing_data.first_call,
+                    "call_duration_min": timing_data.time_between_minutes,
+                    "total_calls": data.get('Número de veces contactado', 0)
+                }
+            },
+            "metadata": {
+                "processed_at": datetime.utcnow().isoformat()
+            }
+        }
 
 class GHLContactPayload(BaseModel):
     email: Optional[str] = None

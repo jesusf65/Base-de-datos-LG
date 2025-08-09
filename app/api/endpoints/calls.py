@@ -13,30 +13,26 @@ async def receive_webhook(request: Request):
         body = await request.body()
         data = json.loads(body)
         
-        # Procesar los datos como antes
+        # Procesar los datos
         timing_data = webhook_service.process_timing_data(data)
         
-        # Preparar payload para LeadConnector
-        lc_payload = webhook_service.prepare_leadconnector_payload(data, timing_data)
-        
-        # Enviar a LeadConnector
-        lc_response = await webhook_service.send_to_leadconnector(lc_payload)
-        
-        # Crear respuesta combinada
+        # Crear respuesta
         response = webhook_service.create_response(
             timing_data,
             data.get('Número de veces contactado', 0)
         )
-        response_dict = response.dict()
+        
+        # Enviar a LeadConnector
+        lc_payload = webhook_service.prepare_leadconnector_payload(data, timing_data)
+        lc_response = await webhook_service.send_to_leadconnector(lc_payload)
         
         if lc_response:
-            logger.info(f"Datos enviados a LeadConnector. Respuesta: {lc_response}")
-            response_dict["lc_status"] = "success"
-            response_dict["lc_response"] = lc_response
+            response["lc_status"] = "success"
+            response["lc_response"] = lc_response
         else:
-            response_dict["lc_status"] = "failed"
+            response["lc_status"] = "failed"
         
-        return response_dict
+        return response
 
     except json.JSONDecodeError:
         logger.error("Invalid JSON received")
