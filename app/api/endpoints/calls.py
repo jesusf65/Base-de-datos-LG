@@ -40,9 +40,8 @@ async def receive_webhook(request: Request):
         timing_data = {
             "contact_creation": None,
             "first_call": None,
-            "time_between": None,
+            "time_between_minutes": None,  # Cambiado a minutos
             "contact_id": data.get('contact_id')
-            
         }
 
         # Formatos de fecha a probar
@@ -65,12 +64,16 @@ async def receive_webhook(request: Request):
             # Calcular diferencia si tenemos ambas fechas
             if create_date and first_call_date:
                 diferencia = first_call_date - create_date
+                diferencia_minutos = diferencia.total_seconds() / 60  # Convertir a minutos
                 
                 logger.info(f"Fecha creación contacto: {create_date}")
                 logger.info(f"Fecha/Hora primera llamada: {first_call_date}")
-                logger.info(f"Tiempo entre creación y primera llamada: {diferencia}")
+                logger.info(f"Tiempo entre creación y primera llamada (minutos): {diferencia_minutos:.2f}")
                 contact_id = data.get('contact_id')
                 logger.info(f"contact_id: {contact_id}")
+                
+                # Actualizar el tiempo en minutos
+                timing_data["time_between_minutes"] = round(diferencia_minutos, 2)
             else:
                 if not create_date:
                     logger.warning("No se pudo obtener fecha de creación válida")
