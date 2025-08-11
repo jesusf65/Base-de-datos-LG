@@ -64,7 +64,7 @@ async def receive_webhook(request: Request):
         logger.info(f"Datos JSON parseados: {json.dumps(payload, indent=2)}")
         
         # Extraer los datos reales del objeto 'data'
-        data = payload.get('custom_fields', {})
+        data = payload.get('Raw data', {})
         
         # Verificar si hay datos
         if not data:
