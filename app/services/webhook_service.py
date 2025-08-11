@@ -34,6 +34,24 @@ class WebhookService:
             '%m/%d/%Y'
         ]
 
+
+
+class WebhookServiceDriverUs:
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
+        self.leadconnector_webhook_url = os.getenv(
+            "LEADCONNECTOR_WEBHOOK_URL",
+            "https://services.leadconnectorhq.com/hooks/k7RoeQKT06Odv8RoFOjg/webhook-trigger/9ed9eac2-24d4-4fee-98d8-6009d2c452e2"
+        )
+        
+        # Formatos de fecha soportados
+        self.date_formats = [
+            '%Y-%m-%dT%H:%M:%S.%fZ',
+            '%m/%d/%Y %H:%M',
+            '%Y-%m-%d',
+            '%m/%d/%Y'
+        ]
+
     def parse_date(self, date_str: str) -> Optional[datetime]:
         """Parsear fecha con múltiples formatos"""
         if not date_str:
