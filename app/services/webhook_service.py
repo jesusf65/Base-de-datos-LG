@@ -179,11 +179,11 @@ class WebhookServiceDriverUs:
         try:
             # Procesar fecha de creación
             creation_str = data.get('date_created') or data.get('Fecha de creación') or data.get('create date')
-            create_date = self.parse_date(creation_str)
+            create_date = self.parse_dates(creation_str)
             
             # Procesar fecha de primera llamada
             first_call_str = data.get('Fecha/Hora primer llamada')
-            first_call_date = self.parse_date(first_call_str)
+            first_call_date = self.parse_dates(first_call_str)
             
             # Calcular diferencia
             if create_date and first_call_date:
