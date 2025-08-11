@@ -46,48 +46,52 @@ async def receive_webhook(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-router = APIRouter()
 logger = setup_logger("webhook_logger_drive_us")
-webhook_service = WebhookServiceDriverUs(logger)
+webhooks_services = WebhookServiceDriverUs(logger)
 
 
 @router.post("/webhook_drive_us")
 async def receive_webhook(request: Request):    
     try:
-        # 1. Primero obtener el cuerpo de la solicitud
-        bodys = await request.body()
+        # 1. Obtener el cuerpo de la solicitud
+        body = await request.body()
         
         # 2. Registrar los datos crudos recibidos
-        logger.info(f"Datos crudos recibidos: {bodys.decode('utf-8')}")
+        logger.info(f"Datos crudos recibidos: {body.decode('utf-8')}")
         
-        # 3. Luego procesar el JSON
-        datas = json.loads(bodys)
+        # 3. Procesar el JSON
+        payload = json.loads(body)
+        logger.info(f"Datos JSON parseados: {json.dumps(payload, indent=2)}")
         
-        # Registrar también el JSON parseado
-        logger.info(f"Datos JSON parseados: {json.dumps(datas, indent=2)}")
+        # Extraer los datos reales del objeto 'data'
+        data = payload.get('data', {})
         
-        # Resto del procesamiento...
-        timing_datas = webhooks_services.process_timing_datas(datas)
+        # Verificar si hay datos
+        if not data:
+            raise HTTPException(status_code=400, detail="No data found in payload")
         
-        responses = webhooks_services.create_responses(
-            timing_datas,
-            datas.get('Número de veces contactado', 0)
+        # Procesamiento con la instancia webhook_service
+        timing_data = webhook_service.process_timing_datas(data)
+        
+        response = webhook_service.create_responses(
+            timing_data,
+            data.get('Número de veces contactado', 0)
         )
         
-        lc_payloads = webhooks_services.prepare_leadconnector_payloads(datas, timing_datas)
-        lc_responses = await webhooks_services.send_to_leadconnectors(lc_payloads)
+        lc_payload = webhook_service.prepare_leadconnector_payloads(data, timing_data)
+        lc_response = await webhook_service.send_to_leadconnectors(lc_payload)
 
-        if lc_responses:
-            responses["lc_status"] = "success"
-            responses["lc_response"] = lc_responses
+        if lc_response:
+            response["lc_status"] = "success"
+            response["lc_response"] = lc_response
         else:
-            responses["lc_status"] = "failed"
+            response["lc_status"] = "failed"
         
-        return responses
+        return response
 
     except json.JSONDecodeError:
-        logger.error(f"Invalid JSON received. Raw data: {bodys.decode('utf-8', errors='replace')}")
+        logger.error(f"Invalid JSON received. Raw data: {body.decode('utf-8', errors='replace')}")
         raise HTTPException(status_code=400, detail="Invalid JSON format")
     except Exception as e:
-        logger.error(f"An error occurred: {e}\nRaw data: {bodys.decode('utf-8', errors='replace')}", exc_info=True)
+        logger.error(f"An error occurred: {e}\nRaw data: {body.decode('utf-8', errors='replace')}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
