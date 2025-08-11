@@ -54,6 +54,8 @@ webhooks_services = WebhookServiceDriverUs(logger)
 async def receive_webhook(request: Request):    
     try:
         body = await request.body()
+        payload = json.loads(body)
+        logger.info(f"Datos JSON parseados: {json.dumps(payload, indent=2)}")
         data = json.loads(body)
         
         # Procesar los datos
