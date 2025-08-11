@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 import json
 from app.services.webhook_service import WebhookService
-from app.services.webhook_service import WebhookServiceDriverUs
+from app.services.webhook_service import WebhookServiceDriverUs,webhooks_services
 
 from app.utils.logger import setup_logger
 
@@ -48,7 +48,7 @@ async def receive_webhook(request: Request):
 
 router = APIRouter()
 logger = setup_logger("webhook_logger_drive_us")
-webhook_services = WebhookServiceDriverUs(logger)
+webhook_service = WebhookServiceDriverUs(logger)
 
 
 @router.post("/webhook_drive_us")
@@ -67,16 +67,16 @@ async def receive_webhook(request: Request):
         logger.info(f"Datos JSON parseados: {json.dumps(datas, indent=2)}")
         
         # Resto del procesamiento...
-        timing_datas = WebhookServiceDriverUs.process_timing_datas(datas)
+        timing_datas = webhooks_services.process_timing_datas(datas)
         
-        responses = WebhookServiceDriverUs.create_responses(
+        responses = webhooks_services.create_responses(
             timing_datas,
             datas.get('Número de veces contactado', 0)
         )
         
-        lc_payloads = WebhookServiceDriverUs.prepare_leadconnector_payloads(datas, timing_datas)
-        lc_responses = await WebhookServiceDriverUs.send_to_leadconnectors(lc_payloads)
-        
+        lc_payloads = webhooks_services.prepare_leadconnector_payloads(datas, timing_datas)
+        lc_responses = await webhooks_services.send_to_leadconnectors(lc_payloads)
+
         if lc_responses:
             responses["lc_status"] = "success"
             responses["lc_response"] = lc_responses
