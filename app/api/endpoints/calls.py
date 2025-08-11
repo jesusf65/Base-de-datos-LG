@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Request, HTTPException
 import json
 from app.services.webhook_service import WebhookService
+from app.services.webhook_service import WebhookServiceDriverUs
+
 from app.utils.logger import setup_logger
 
 router = APIRouter()
@@ -48,17 +50,17 @@ async def receive_webhook(request: Request):
         data = json.loads(body)
         
         # Procesar los datos
-        timing_data = webhook_service.process_timing_data(data)
+        timing_data = WebhookServiceDriverUs.process_timing_data(data)
         
         # Crear respuesta
-        response = webhook_service.create_response(
+        response = WebhookServiceDriverUs.create_response(
             timing_data,
             data.get('Número de veces contactado', 0)
         )
         
         # Enviar a LeadConnector
-        lc_payload = webhook_service.prepare_leadconnector_payload(data, timing_data)
-        lc_response = await webhook_service.send_to_leadconnector(lc_payload)
+        lc_payload = WebhookServiceDriverUs.prepare_leadconnector_payload(data, timing_data)
+        lc_response = await WebhookServiceDriverUs.send_to_leadconnector(lc_payload)
         
         if lc_response:
             response["lc_status"] = "success"

@@ -41,7 +41,7 @@ class WebhookServiceDriverUs:
         self.logger = logger
         self.leadconnector_webhook_url = os.getenv(
             "LEADCONNECTOR_WEBHOOK_URL",
-            "https://services.leadconnectorhq.com/hooks/k7RoeQKT06Odv8RoFOjg/webhook-trigger/9ed9eac2-24d4-4fee-98d8-6009d2c452e2"
+            "https://services.leadconnectorhq.com/hooks/zmN2snXFkGxFawxaNH2Z/webhook-trigger/9511c21e-beb9-446e-ace7-a8121dad5a07"
         )
         
         # Formatos de fecha soportados
