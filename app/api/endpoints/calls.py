@@ -71,15 +71,15 @@ async def receive_webhook(request: Request):
             raise HTTPException(status_code=400, detail="No data found in payload")
         
         # Procesamiento con la instancia webhook_service
-        timing_data = webhook_service.process_timing_datas(data)
+        timing_data = webhooks_services.process_timing_datas(data)
         
-        response = webhook_service.create_responses(
+        response = webhooks_services.create_responses(
             timing_data,
             data.get('Número de veces contactado', 0)
         )
         
-        lc_payload = webhook_service.prepare_leadconnector_payloads(data, timing_data)
-        lc_response = await webhook_service.send_to_leadconnectors(lc_payload)
+        lc_payload = webhooks_services.prepare_leadconnector_payloads(data, timing_data)
+        lc_response = await webhooks_services.send_to_leadconnectors(lc_payload)
 
         if lc_response:
             response["lc_status"] = "success"
