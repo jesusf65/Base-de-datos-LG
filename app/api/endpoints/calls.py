@@ -9,6 +9,8 @@ router = APIRouter()
 logger = setup_logger("webhook_logger")
 webhook_service = WebhookService(logger)
 
+
+
 @router.post("/webhook")
 async def receive_webhook(request: Request):    
     try:
@@ -42,6 +44,12 @@ async def receive_webhook(request: Request):
     except Exception as e:
         logger.error(f"An error occurred: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+router = APIRouter()
+logger = setup_logger("webhook_logger_drive_us")
+webhook_services = WebhookServiceDriverUs(logger)
+
 
 @router.post("/webhook_drive_us")
 async def receive_webhook(request: Request):    
