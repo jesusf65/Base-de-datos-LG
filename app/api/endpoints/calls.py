@@ -64,7 +64,7 @@ async def receive_webhook(request: Request):
         logger.info(f"Datos JSON parseados: {json.dumps(payload, indent=2)}")
         
         # Extraer los datos reales del objeto 'data'
-        data = payload.get('data', {})
+        data = payload.get('custom_fields', {})
         
         # Verificar si hay datos
         if not data:
@@ -75,7 +75,7 @@ async def receive_webhook(request: Request):
         
         response = webhooks_services.create_responses(
             timing_data,
-            data.get('Número de veces contactado', 0)
+            data.get('Numero de veces contactado', 0)
         )
         
         lc_payload = webhooks_services.prepare_leadconnector_payloads(data, timing_data)
