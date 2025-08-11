@@ -60,7 +60,7 @@ async def receive_webhook(request: Request):
         timing_data = webhooks_services.process_timing_datas(data)
 
         # Crear respuesta
-        response = webhooks_services.create_response(
+        response = webhooks_services.create_responses(
             timing_data,
             data.get('Número de veces contactado', 0)
         )
