@@ -46,29 +46,29 @@ async def receive_webhook(request: Request):
 @router.post("/webhook_drive_us")
 async def receive_webhook(request: Request):    
     try:
-        body = await request.body()
-        data = json.loads(body)
+        bodys = await request.body()
+        datas = json.loads(bodys)
         
         # Procesar los datos
-        timing_data = WebhookServiceDriverUs.process_timing_data(data)
+        timing_datas = WebhookServiceDriverUs.process_timing_datas(datas)
         
         # Crear respuesta
-        response = WebhookServiceDriverUs.create_response(
-            timing_data,
-            data.get('Número de veces contactado', 0)
+        responses = WebhookServiceDriverUs.create_responses(
+            timing_datas,
+            datas.get('Número de veces contactado', 0)
         )
         
         # Enviar a LeadConnector
-        lc_payload = WebhookServiceDriverUs.prepare_leadconnector_payload(data, timing_data)
-        lc_response = await WebhookServiceDriverUs.send_to_leadconnector(lc_payload)
+        lc_payloads = WebhookServiceDriverUs.prepare_leadconnector_payloads(datas, timing_datas)
+        lc_responses = await WebhookServiceDriverUs.send_to_leadconnectors(lc_payloads)
         
-        if lc_response:
-            response["lc_status"] = "success"
-            response["lc_response"] = lc_response
+        if lc_responses:
+            responses["lc_status"] = "success"
+            responses["lc_response"] = lc_responses
         else:
-            response["lc_status"] = "failed"
+            responses["lc_status"] = "failed"
         
-        return response
+        return responses
 
     except json.JSONDecodeError:
         logger.error("Invalid JSON received")
