@@ -54,19 +54,26 @@ webhook_services = WebhookServiceDriverUs(logger)
 @router.post("/webhook_drive_us")
 async def receive_webhook(request: Request):    
     try:
+        # 1. Primero obtener el cuerpo de la solicitud
         bodys = await request.body()
+        
+        # 2. Registrar los datos crudos recibidos
+        logger.info(f"Datos crudos recibidos: {bodys.decode('utf-8')}")
+        
+        # 3. Luego procesar el JSON
         datas = json.loads(bodys)
         
-        # Procesar los datos
+        # Registrar también el JSON parseado
+        logger.info(f"Datos JSON parseados: {json.dumps(datas, indent=2)}")
+        
+        # Resto del procesamiento...
         timing_datas = WebhookServiceDriverUs.process_timing_datas(datas)
         
-        # Crear respuesta
         responses = WebhookServiceDriverUs.create_responses(
             timing_datas,
             datas.get('Número de veces contactado', 0)
         )
         
-        # Enviar a LeadConnector
         lc_payloads = WebhookServiceDriverUs.prepare_leadconnector_payloads(datas, timing_datas)
         lc_responses = await WebhookServiceDriverUs.send_to_leadconnectors(lc_payloads)
         
@@ -79,8 +86,8 @@ async def receive_webhook(request: Request):
         return responses
 
     except json.JSONDecodeError:
-        logger.error("Invalid JSON received")
+        logger.error(f"Invalid JSON received. Raw data: {bodys.decode('utf-8', errors='replace')}")
         raise HTTPException(status_code=400, detail="Invalid JSON format")
     except Exception as e:
-        logger.error(f"An error occurred: {e}", exc_info=True)
+        logger.error(f"An error occurred: {e}\nRaw data: {bodys.decode('utf-8', errors='replace')}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
