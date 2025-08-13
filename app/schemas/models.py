@@ -3,8 +3,8 @@ from typing import Optional
 from datetime import datetime
 
 class TimingData(BaseModel):
-    contact_creation: Optional[str]
-    first_call: Optional[str]
+    Call_AIRCALL: Optional[str]
+    Call_CRM: Optional[str]
     time_between_minutes: Optional[float]
     contact_id: Optional[str]
 
