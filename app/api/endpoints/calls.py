@@ -16,6 +16,7 @@ async def receive_webhook(request: Request):
     try:
         body = await request.body()
         data = json.loads(body)
+        logger.debug(f"Received body: {body}")
         
         # Procesar los datos
         timing_data = webhook_service.process_timing_data(data)
