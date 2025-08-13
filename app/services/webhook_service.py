@@ -39,7 +39,7 @@ class WebhookService:
         ]
         self.miami_tz = pytz.timezone('America/New_York')
 
-    def parse_date(self, date_str: str, subtract_hours: int = 4) -> Optional[datetime]:
+    def parse_date(self, date_str: str, subtract_hours: int = 0) -> Optional[datetime]:
         """Parsear fecha con múltiples formatos, convertir a Miami time y restar horas"""
         if not date_str or date_str.strip() == "":
             return None
@@ -62,33 +62,32 @@ class WebhookService:
 
     def unix_to_miami(self, unix_timestamp: str, is_milliseconds: bool = True) -> Optional[datetime]:
         """Convertir timestamp UNIX a Miami time"""
-        unix = unix_timestamp and unix_timestamp.strip() != "{{inboundWebhookRequest.data.started_at}}"
-        if not unix:
+        if not unix_timestamp or not unix_timestamp.strip():
             return None
         
-        if unix:
-            try:
-                
-                if unix_timestamp.startswith("{{") and unix_timestamp.endswith("}}"):
+        try:
+        # Limpiar el timestamp si viene con formato {{...}}
+            clean_timestamp = unix_timestamp.replace("{{", "").replace("}}", "").strip()
             
-                    try:
-                        # Limpiar el timestamp si viene con formato {{...}}
-                        clean_timestamp = unix_timestamp.replace("{{", "").replace("}}", "").strip()
-                        
-                        timestamp = float(clean_timestamp)
-                        if is_milliseconds:
-                            timestamp /= 1000
-                        
-                        utc_date = datetime.utcfromtimestamp(timestamp).replace(tzinfo=pytz.utc)
-                        return utc_date.astimezone(self.miami_tz)
-                    
-                    except (ValueError, TypeError) as e:
-                        self.logger.error(f"Error limpiando o convirtiendo timestamp UNIX1: {str(e)}")
-                        return None
-                    
-            except (ValueError, TypeError) as e:
-                self.logger.error(f"Error convirtiendo timestamp UNIX2: {str(e)}")
+            # Verificar si es un número válido
+            if not clean_timestamp.isdigit():
+                self.logger.warning(f"Timestamp no numérico: {clean_timestamp}")
                 return None
+                
+            timestamp = float(clean_timestamp)
+            
+            # Convertir a segundos si está en milisegundos
+            if is_milliseconds:
+                timestamp /= 1000
+                
+            # Convertir a datetime en UTC y luego a Miami
+            utc_date = datetime.utcfromtimestamp(timestamp).replace(tzinfo=pytz.utc)
+            return utc_date.astimezone(self.miami_tz)
+        
+        except (ValueError, TypeError, OSError) as e:
+            self.logger.error(f"Error convirtiendo timestamp UNIX '{unix_timestamp}': {str(e)}")
+            return None
+
 
     def process_timing_data(self, data: Dict) -> TimingData:
         """Procesa los datos de tiempo con zona horaria de Miami"""
@@ -96,47 +95,59 @@ class WebhookService:
         timing_data.contact_id = data.get('contact_id')
 
         try:
-            # Obtener datos de customData si existe
+            # Obtener datos de customData
             custom_data = data.get('customData', {})
             
-            # Procesar date_created (desde el nivel principal)
+            # 1. Procesar date_created (desde el nivel principal)
             create_date = self.parse_date(data.get('date_created'))
+            if not create_date:
+                self.logger.warning("No se pudo obtener date_created válido")
+                return timing_data
             
-            # Procesar Call_AIRCALL desde customData
-            call_aircall = custom_data.get('Call_AIRCALL')
+            # 2. Procesar Call_AIRCALL (prioridad alta)
+            call_aircall = custom_data.get('Call_AIRCALL', '')
             first_call_date = None
             
-            if call_aircall:
-                if call_aircall.startswith("{{") and call_aircall.endswith("}}"):
-                    # Es un timestamp UNIX (procesar con unix_to_miami)
-                    first_call_date = self.unix_to_miami(call_aircall)
-                else:
-                    # Intentar parsear como fecha normal
+            # Intentar como timestamp UNIX (segundos)
+            if call_aircall and str(call_aircall).strip():
+                first_call_date = self.unix_to_miami(call_aircall, is_milliseconds=False)
+                
+                # Si falla como segundos, intentar como milisegundos
+                if not first_call_date and len(str(call_aircall)) > 10:
+                    first_call_date = self.unix_to_miami(call_aircall, is_milliseconds=True)
+                
+                # Si aún no funciona, intentar como fecha normal
+                if not first_call_date:
                     first_call_date = self.parse_date(call_aircall)
             
-            # Si no hay Call_AIRCALL válido, intentar con Call_CRM desde customData
+            # 3. Si no hay Call_AIRCALL válido, intentar con Call_CRM
             if not first_call_date:
-                first_call_date = self.parse_date(custom_data.get('Call_CRM'))
+                call_crm = custom_data.get('Call_CRM', '')
+                if call_crm and str(call_crm).strip():
+                    first_call_date = self.parse_date(call_crm)
             
-            if create_date and first_call_date:
-                # Asegurar timezone en ambas fechas
-                create_date = create_date.astimezone(self.miami_tz)
-                first_call_date = first_call_date.astimezone(self.miami_tz)
-                
-                # Calcular diferencia
-                diferencia = first_call_date - create_date
-                diferencia_minutos = diferencia.total_seconds() / 60
-                
-                self.logger.info(f"Fecha creación contacto (Miami -4h): {create_date}")
-                self.logger.info(f"Fecha primera llamada (Miami): {first_call_date}")
-                self.logger.info(f"Tiempo entre eventos (minutos): {diferencia_minutos:.2f}")
-                
-                timing_data.contact_creation = create_date.isoformat()
-                timing_data.first_call = first_call_date.isoformat()
-                timing_data.time_between_minutes = round(diferencia_minutos, 2)
-            else:
-                self.logger.warning("No se pudieron procesar ambas fechas necesarias")
-                
+            # Validar que tenemos ambas fechas
+            if not first_call_date:
+                self.logger.warning("No se pudo obtener fecha de primera llamada válida")
+                return timing_data
+            
+            # Asegurar timezone en ambas fechas
+            create_date = create_date.astimezone(self.miami_tz)
+            first_call_date = first_call_date.astimezone(self.miami_tz)
+            
+            # Calcular diferencia en minutos
+            diferencia = first_call_date - create_date
+            diferencia_minutos = diferencia.total_seconds() / 60
+            
+            self.logger.info(f"Fecha creación contacto (Miami -4h): {create_date}")
+            self.logger.info(f"Fecha primera llamada (Miami): {first_call_date}")
+            self.logger.info(f"Tiempo entre eventos (minutos): {diferencia_minutos:.2f}")
+            
+            # Guardar resultados
+            timing_data.contact_creation = create_date.isoformat()
+            timing_data.first_call = first_call_date.isoformat()
+            timing_data.time_between_minutes = round(diferencia_minutos, 2)
+            
         except Exception as e:
             self.logger.error(f"Error procesando fechas: {str(e)}", exc_info=True)
             
