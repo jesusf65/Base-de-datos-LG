@@ -7,8 +7,8 @@ import os
 import pytz
 class TimingData:
     def __init__(self):
-        self.Call_AIRCALL = None
-        self.Call_CRM = None
+        self.contact_creation = None
+        self.first_call = None
         self.time_between_minutes = None
         self.contact_id = None
 
@@ -133,9 +133,9 @@ class WebhookService:
                 "email": data.get("email"),
                 "phone": data.get("phone"),
                 "name": data.get("name"),
-                "custom_data": {
-                    "Call_AIRCALL": timing_data.Call_AIRCALL,
-                    "Call_CRM": timing_data.Call_CRM,
+                "custom_fields": {
+                    "contact_creation": timing_data.contact_creation,
+                    "first_call_time": timing_data.first_call,
                     "time_between_minutes": timing_data.time_between_minutes,
                     "call_count": data.get('Número de veces contactado', 0)
                 }
@@ -260,9 +260,9 @@ class WebhookServiceDriverUs:
                 "email": data.get("email"),
                 "phone": data.get("phone"),
                 "name": data.get("name"),
-                "custom_data": {
-                    "Call_AIRCALL": timing_data.Call_AIRCALL,
-                    "Call_CRM": timing_data.Call_CRM,
+                "custom_fields": {
+                    "contact_creation": timing_data.contact_creation,
+                    "first_call_time": timing_data.first_call,
                     "time_between_minutes": timing_data.time_between_minutes,
                     "call_count": data.get('Número de veces contactado', 0)
                 }
