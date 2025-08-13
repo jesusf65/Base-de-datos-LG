@@ -64,7 +64,31 @@ class WebhookService:
         """Convertir timestamp UNIX a Miami time"""
         unix = unix_timestamp and unix_timestamp.strip() != "{{inboundWebhookRequest.data.started_at}}"
         if not unix:
-            return print("No se proporcionó un timestamp UNIX válido.")
+            return None
+        
+        if unix:
+            try:
+                
+                if unix_timestamp.startswith("{{") and unix_timestamp.endswith("}}"):
+            
+                    try:
+                        # Limpiar el timestamp si viene con formato {{...}}
+                        clean_timestamp = unix_timestamp.replace("{{", "").replace("}}", "").strip()
+                        
+                        timestamp = float(clean_timestamp)
+                        if is_milliseconds:
+                            timestamp /= 1000
+                        
+                        utc_date = datetime.utcfromtimestamp(timestamp).replace(tzinfo=pytz.utc)
+                        return utc_date.astimezone(self.miami_tz)
+                    
+                    except (ValueError, TypeError) as e:
+                        self.logger.error(f"Error limpiando o convirtiendo timestamp UNIX1: {str(e)}")
+                        return None
+                    
+            except (ValueError, TypeError) as e:
+                self.logger.error(f"Error convirtiendo timestamp UNIX2: {str(e)}")
+                return None
 
     def process_timing_data(self, data: Dict) -> TimingData:
         """Procesa los datos de tiempo con zona horaria de Miami"""
