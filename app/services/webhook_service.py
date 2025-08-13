@@ -26,6 +26,12 @@ class WebhookService:
             "https://services.leadconnectorhq.com/hooks/k7RoeQKT06Odv8RoFOjg/webhook-trigger/9ed9eac2-24d4-4fee-98d8-6009d2c452e2"
         )
         
+        self.date_formats = [
+            '%Y-%m-%dT%H:%M:%S.%fZ',
+            '%m/%d/%Y %H:%M',
+            '%Y-%m-%d',
+            '%m/%d/%Y'
+        ]
         self.gmt5 = pytz.timezone('America/Bogota')
 
     def parse_date(self, date_str: str) -> Optional[datetime]:
@@ -149,6 +155,12 @@ class WebhookServiceDriverUs:
             "https://services.leadconnectorhq.com/hooks/zmN2snXFkGxFawxaNH2Z/webhook-trigger/cb471924-37ca-4e3c-a13d-4c821d851c3e"
         )
         
+        self.date_formats = [
+            '%Y-%m-%dT%H:%M:%S.%fZ',
+            '%m/%d/%Y %H:%M',
+            '%Y-%m-%d',
+            '%m/%d/%Y'
+        ]
         self.gmt5 = pytz.timezone('America/Bogota')
 
     def parse_dates(self, date_str: str) -> Optional[datetime]:
