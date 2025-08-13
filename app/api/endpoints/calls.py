@@ -13,8 +13,22 @@ async def receive_webhook(request: Request):
         body = await request.body()
         data = json.loads(body)
         logger.info(f"Payload recibido en /webhook: {json.dumps(data, indent=2)}")
+        
+        # Validar campos requeridos
+        if not data.get('date_created'):
+            raise HTTPException(
+                status_code=400,
+                detail="Campos obligatorios faltantes: 'date_created'"
+            )
 
+        # Procesar los datos (ahora con zona horaria Miami y conversión UNIX)
         timing_data = webhook_service.process_timing_data(data)
+        
+        if not timing_data.time_between_minutes:
+            raise HTTPException(
+                status_code=400,
+                detail="No se pudo calcular la diferencia de tiempo. Verifique los formatos de fecha."
+            )
 
         # Crear respuesta
         response = webhook_service.create_response(
@@ -28,7 +42,7 @@ async def receive_webhook(request: Request):
         
         if lc_response:
             response["lc_status"] = "success"
-            logger.info("Datos enviados exitosamente a LeadConnector Premium Cars")
+            logger.info("Datos enviados exitosamente a LeadConnector")
             response["lc_response"] = lc_response
         else:
             response["lc_status"] = "failed"
@@ -44,82 +58,3 @@ async def receive_webhook(request: Request):
     except Exception as e:
         logger.error(f"Error inesperado: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
-    
-
-
-@router.post("/webhook_drive_us")
-async def receive_webhook(request: Request):    
-    try:
-        body = await request.body()
-        data = json.loads(body)
-        logger.info(f"Payload recibido en /webhook_drive_us: {json.dumps(data, indent=2)}")
-
-        data_timing = webhook_service.process_timing_data(data)
-
-        # Crear respuesta
-        response = webhook_service.create_response(
-            data_timing,
-            data.get('Número de veces contactado', 0)
-        )
-        
-        # Enviar a LeadConnector
-        us_payload = webhook_service.prepare_leadconnector_payload(data, data_timing)
-        cc_response = await webhook_service.send_to_leadconnector_drive_us(us_payload)
-        
-        if cc_response:
-            response["lc_status"] = "success"
-            logger.info("Datos enviados exitosamente a LeadConnector Driver US")
-            response["lc_response"] = cc_response
-        else:
-            response["lc_status"] = "failed"
-            logger.warning("Falló el envío a LeadConnector Driver US")
-        
-        return response
-
-    except json.JSONDecodeError:
-        logger.error("JSON inválido recibido")
-        raise HTTPException(status_code=400, detail="Formato JSON inválido")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error inesperado: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
-    
-@router.post("/webhook_dalcava")
-async def receive_webhook(request: Request):    
-    try:
-        body = await request.body()
-        data = json.loads(body)
-        logger.info(f"Payload recibido en /webhook_dalcava: {json.dumps(data, indent=2)}")
-
-        data_timing = webhook_service.process_timing_data(data)
-
-        # Crear respuesta
-        response = webhook_service.create_response(
-            data_timing,
-            data.get('Número de veces contactado', 0)
-        )
-        
-        # Enviar a LeadConnector
-        ss_payload = webhook_service.prepare_leadconnector_payload(data, data_timing)
-        sc_response = await webhook_service.send_to_leadconnector_dalcava(ss_payload)
-        
-        if sc_response:
-            response["lc_status"] = "success"
-            logger.info("Datos enviados exitosamente a LeadConnector Dalcava")
-            response["lc_response"] = sc_response
-        else:
-            response["lc_status"] = "failed"
-            logger.warning("Falló el envío a LeadConnector Dalcava")
-        
-        return response
-
-    except json.JSONDecodeError:
-        logger.error("JSON inválido recibido")
-        raise HTTPException(status_code=400, detail="Formato JSON inválido")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error inesperado: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
-    
