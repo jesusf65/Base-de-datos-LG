@@ -15,10 +15,10 @@ async def receive_webhook(request: Request):
         logger.info(f"Payload recibido en /webhook: {json.dumps(data, indent=2)}")
         
         # Validar campos requeridos
-        if not data.get('date_created') or not data.get('Call_AIRCALL'):
+        if not data.get('date_created'):
             raise HTTPException(
                 status_code=400,
-                detail="Campos obligatorios faltantes: 'date_created' o 'Call_AIRCALL'"
+                detail="Campos obligatorios faltantes: 'date_created'"
             )
 
         # Procesar los datos (ahora con zona horaria Miami y conversión UNIX)
