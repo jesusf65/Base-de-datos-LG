@@ -25,6 +25,10 @@ class GHLContactPayload(BaseModel):
 class WebhookService:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
+        self.leadconnector_webhook_url_drive_us = os.getenv(
+            "LEADCONNECTOR_WEBHOOK_URL",
+            "https://services.leadconnectorhq.com/hooks/zmN2snXFkGxFawxaNH2Z/webhook-trigger/cb471924-37ca-4e3c-a13d-4c821d851c3e")
+        
         self.leadconnector_webhook_url = os.getenv(
             "LEADCONNECTOR_WEBHOOK_URL",
             "https://services.leadconnectorhq.com/hooks/k7RoeQKT06Odv8RoFOjg/webhook-trigger/9ed9eac2-24d4-4fee-98d8-6009d2c452e2"
@@ -210,3 +214,25 @@ class WebhookService:
                 "processed_at": datetime.utcnow().isoformat()
             }
         }
+    async def send_to_leadconnector_drive_us(self, payload: Dict) -> Optional[Dict]:
+        """Envía datos al webhook de LeadConnector"""
+        headers = {
+            "Content-Type": "application/json",
+            "Version": "2021-07-28"
+        }
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.leadconnector_webhook_url_drive_us,
+                    json=payload,
+                    headers=headers,
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"Error HTTP al enviar a LeadConnector: {e.response.text}")
+        except Exception as e:
+            self.logger.error(f"Error inesperado al enviar a LeadConnector: {str(e)}")
+        return None
