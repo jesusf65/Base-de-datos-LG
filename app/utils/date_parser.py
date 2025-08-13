@@ -1,5 +1,5 @@
 from datetime import datetime
-import pytz  # Requiere instalación: pip install pytz
+import pytz  
 
 DATE_FORMATS = [
     '%Y-%m-%dT%H:%M:%S.%fZ',  # Formato ISO (UTC)
@@ -9,21 +9,21 @@ DATE_FORMATS = [
 ]
 
 def parse_date(date_str, formats=DATE_FORMATS):
-    """Intenta parsear una fecha usando múltiples formatos y la convierte a GMT-5."""
+    """Intenta parsear una fecha usando múltiples formatos y la convierte a Miami (GMT-5/GMT-4)."""
     if not date_str:
         return None
         
     for fmt in formats:
         try:
             parsed_date = datetime.strptime(date_str, fmt)
-            # Si la fecha está en UTC (formato ISO con 'Z'), la convertimos a GMT-5
+            # Si la fecha está en UTC (formato ISO con 'Z'), la convertimos a Miami
             if fmt.endswith('Z'):
                 utc_date = pytz.utc.localize(parsed_date)
-                gmt5 = pytz.timezone('America/Bogota')  # GMT-5 (Colombia)
-                return utc_date.astimezone(gmt5)
+                miami_tz = pytz.timezone('America/New_York')  # Miami usa esta zona
+                return utc_date.astimezone(miami_tz)
             else:
-                # Asumimos que la fecha ya está en GMT-5 (sin información de zona horaria)
-                return pytz.timezone('America/Bogota').localize(parsed_date)
+                # Asumimos que la fecha ya está en Miami (sin info de zona horaria)
+                return pytz.timezone('America/New_York').localize(parsed_date)
         except ValueError:
             continue
     return None

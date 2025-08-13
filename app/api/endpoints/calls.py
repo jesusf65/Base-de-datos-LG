@@ -1,15 +1,11 @@
 from fastapi import APIRouter, Request, HTTPException
 import json
 from app.services.webhook_service import WebhookService
-from app.services.webhook_service import WebhookServiceDriverUs,webhooks_services
-
 from app.utils.logger import setup_logger
 
 router = APIRouter()
 logger = setup_logger("webhook_logger")
 webhook_service = WebhookService(logger)
-
-
 
 @router.post("/webhook")
 async def receive_webhook(request: Request):    
@@ -17,9 +13,23 @@ async def receive_webhook(request: Request):
         body = await request.body()
         data = json.loads(body)
         logger.info(f"Payload recibido en /webhook: {json.dumps(data, indent=2)}")
-        # Procesar los datos
+        
+        # Validar campos requeridos
+        if not data.get('date_created') or not data.get('Call_AIRCALL'):
+            raise HTTPException(
+                status_code=400,
+                detail="Campos obligatorios faltantes: 'date_created' o 'Call_AIRCALL'"
+            )
+
+        # Procesar los datos (ahora con zona horaria Miami y conversión UNIX)
         timing_data = webhook_service.process_timing_data(data)
         
+        if not timing_data.time_between_minutes:
+            raise HTTPException(
+                status_code=400,
+                detail="No se pudo calcular la diferencia de tiempo. Verifique los formatos de fecha."
+            )
+
         # Crear respuesta
         response = webhook_service.create_response(
             timing_data,
@@ -32,56 +42,19 @@ async def receive_webhook(request: Request):
         
         if lc_response:
             response["lc_status"] = "success"
-            print("datos enviados a premium_cars")
+            logger.info("Datos enviados exitosamente a LeadConnector")
             response["lc_response"] = lc_response
         else:
             response["lc_status"] = "failed"
+            logger.warning("Falló el envío a LeadConnector")
         
         return response
 
     except json.JSONDecodeError:
-        logger.error("Invalid JSON received")
-        raise HTTPException(status_code=400, detail="Invalid JSON format")
+        logger.error("JSON inválido recibido")
+        raise HTTPException(status_code=400, detail="Formato JSON inválido")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"An error occurred: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-logger = setup_logger("webhook_logger_drive_us")
-webhooks_services = WebhookServiceDriverUs(logger)
-
-
-@router.post("/webhook_drive_us")
-async def receive_webhook(request: Request):    
-    try:
-        body = await request.body()
-        data = json.loads(body)
-        
-        # Procesar los datos
-        timing_data = webhooks_services.process_timing_datas(data)
-
-        # Crear respuesta
-        response = webhooks_services.create_responses(
-            timing_data,
-            data.get('Número de veces contactado', 0)
-        )
-        
-        # Enviar a LeadConnector
-        lc_payloads = webhooks_services.prepare_leadconnector_payloads(data, timing_data)
-        lc_responses = await webhooks_services.send_to_leadconnectors(lc_payloads)
-
-        if lc_responses:
-            response["lc_status"] = "success"
-            print("datos enviados a driver_us")
-            
-            response["lc_responses"] = lc_responses
-        else:
-            response["lc_status"] = "failed"
-        
-        return response
-    except json.JSONDecodeError:
-        logger.error("Invalid JSON received")
-        raise HTTPException(status_code=400, detail="Invalid JSON format")
-    except Exception as e:
-        logger.error(f"An error occurred: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error inesperado: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
