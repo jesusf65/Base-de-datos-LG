@@ -92,7 +92,7 @@ async def receive_webhook(request: Request):
         data = json.loads(body)
         logger.info(f"Payload recibido en /webhook_dalcava: {json.dumps(data, indent=2)}")
 
-        data_timing = webhook_service.send_to_leadconnector_dalcava(data)
+        data_timing = webhook_service.process_timing_data(data)
 
         # Crear respuesta
         response = webhook_service.create_response(
@@ -101,13 +101,13 @@ async def receive_webhook(request: Request):
         )
         
         # Enviar a LeadConnector
-        us_payload = webhook_service.prepare_leadconnector_payload(data, data_timing)
-        cc_response = await webhook_service.send_to_leadconnector_dalcava(us_payload)
+        ss_payload = webhook_service.prepare_leadconnector_payload(data, data_timing)
+        sc_response = await webhook_service.send_to_leadconnector_dalcava(ss_payload)
         
-        if cc_response:
+        if sc_response:
             response["lc_status"] = "success"
             logger.info("Datos enviados exitosamente a LeadConnector Dalcava")
-            response["lc_response"] = cc_response
+            response["lc_response"] = sc_response
         else:
             response["lc_status"] = "failed"
             logger.warning("Falló el envío a LeadConnector Dalcava")
