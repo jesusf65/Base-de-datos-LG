@@ -25,6 +25,9 @@ class GHLContactPayload(BaseModel):
 class WebhookService:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
+        self.leadconnector_webhook_url_dalcava = os.getenv(
+            "LEADCONNECTOR_WEBHOOK_URL_DALCAVA",
+            "https://services.leadconnectorhq.com/hooks/uarFkuKZk7XyQhgUU6tK/webhook-trigger/aOjBgZaAYxGcDCM1GGOW")
         self.leadconnector_webhook_url_drive_us = os.getenv(
             "LEADCONNECTOR_WEBHOOK_URL_DRIVE_US",
             "https://services.leadconnectorhq.com/hooks/zmN2snXFkGxFawxaNH2Z/webhook-trigger/cb471924-37ca-4e3c-a13d-4c821d851c3e")
@@ -189,9 +192,9 @@ class WebhookService:
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPStatusError as e:
-            self.logger.error(f"Error HTTP al enviar a LeadConnector: {e.response.text}")
+            self.logger.error(f"Error HTTP al enviar a LeadConnector premium cars: {e.response.text}")
         except Exception as e:
-            self.logger.error(f"Error inesperado al enviar a LeadConnector: {str(e)}")
+            self.logger.error(f"Error inesperado al enviar a LeadConnector premium cars: {str(e)}")
         return None
 
     def prepare_leadconnector_payload(self, data: Dict, timing_data: TimingData) -> Dict:
@@ -232,7 +235,31 @@ class WebhookService:
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPStatusError as e:
-            self.logger.error(f"Error HTTP al enviar a LeadConnector: {e.response.text}")
+            self.logger.error(f"Error HTTP al enviar a LeadConnector driver us: {e.response.text}")
         except Exception as e:
-            self.logger.error(f"Error inesperado al enviar a LeadConnector: {str(e)}")
+            self.logger.error(f"Error inesperado al enviar a LeadConnector driver us: {str(e)}")
+        return None
+    
+    
+    async def send_to_leadconnector_dalcava(self, payload: Dict) -> Optional[Dict]:
+        """Envía datos al webhook de LeadConnector"""
+        headers = {
+            "Content-Type": "application/json",
+            "Version": "2021-07-28"
+        }
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.leadconnector_webhook_url_dalcava,
+                    json=payload,
+                    headers=headers,
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"Error HTTP al enviar a LeadConnector Dalcava: {e.response.text}")
+        except Exception as e:
+            self.logger.error(f"Error inesperado al enviar a LeadConnector Dalcava: {str(e)}")
         return None
