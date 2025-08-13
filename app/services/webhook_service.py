@@ -26,7 +26,7 @@ class WebhookService:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
         self.leadconnector_webhook_url_drive_us = os.getenv(
-            "LEADCONNECTOR_WEBHOOK_URL",
+            "LEADCONNECTOR_WEBHOOK_URL_DRIVE_US",
             "https://services.leadconnectorhq.com/hooks/zmN2snXFkGxFawxaNH2Z/webhook-trigger/cb471924-37ca-4e3c-a13d-4c821d851c3e")
         
         self.leadconnector_webhook_url = os.getenv(

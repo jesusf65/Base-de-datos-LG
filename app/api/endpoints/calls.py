@@ -64,7 +64,7 @@ async def receive_webhook(request: Request):
         
         # Enviar a LeadConnector
         us_payload = webhook_service.prepare_leadconnector_payload(data, data_timing)
-        cc_response = await webhook_service.send_to_leadconnector(us_payload)
+        cc_response = await webhook_service.send_to_leadconnector_drive_us(us_payload)
         
         if cc_response:
             response["lc_status"] = "success"
