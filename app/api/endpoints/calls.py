@@ -32,6 +32,7 @@ async def receive_webhook(request: Request):
         
         if lc_response:
             response["lc_status"] = "success"
+            print("datos enviados a premium_cars")
             response["lc_response"] = lc_response
         else:
             response["lc_status"] = "failed"
@@ -54,8 +55,6 @@ webhooks_services = WebhookServiceDriverUs(logger)
 async def receive_webhook(request: Request):    
     try:
         body = await request.body()
-        payload = json.loads(body)
-        logger.info(f"Datos JSON parseados: {json.dumps(payload, indent=2)}")
         data = json.loads(body)
         
         # Procesar los datos
@@ -73,12 +72,13 @@ async def receive_webhook(request: Request):
 
         if lc_responses:
             response["lc_status"] = "success"
+            print("datos enviados a driver_us")
+            
             response["lc_responses"] = lc_responses
         else:
             response["lc_status"] = "failed"
         
         return response
-
     except json.JSONDecodeError:
         logger.error("Invalid JSON received")
         raise HTTPException(status_code=400, detail="Invalid JSON format")
