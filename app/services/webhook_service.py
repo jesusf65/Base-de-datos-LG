@@ -191,11 +191,10 @@ class WebhookServiceDriverUs:
 
         try:
             # Procesar fechas con zona horaria
-            create_date = self.parse_date(data.get('date_created'))
-            first_call_date = self.parse_date(data.get('Fecha/Hora primer llamada'))
+            create_date = self.parse_dates(data.get('date_created'))
+            first_call_date = self.parse_dates(data.get('Fecha/Hora primer llamada'))
             
             if create_date and first_call_date:
-                # Asegurarse de que ambas fechas están en GMT-5
                 create_date = create_date.astimezone(self.gmt5)
                 first_call_date = first_call_date.astimezone(self.gmt5)
                 
