@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 import httpx
 import logging
 import os
-
+import pytz
 class TimingData:
     def __init__(self):
         self.contact_creation = None
@@ -26,58 +26,56 @@ class WebhookService:
             "https://services.leadconnectorhq.com/hooks/k7RoeQKT06Odv8RoFOjg/webhook-trigger/9ed9eac2-24d4-4fee-98d8-6009d2c452e2"
         )
         
-        # Formatos de fecha soportados
-        self.date_formats = [
-            '%Y-%m-%dT%H:%M:%S.%fZ',
-            '%m/%d/%Y %H:%M',
-            '%Y-%m-%d',
-            '%m/%d/%Y'
-        ]
+        self.gmt5 = pytz.timezone('America/Bogota')
 
     def parse_date(self, date_str: str) -> Optional[datetime]:
-        """Parsear fecha con múltiples formatos"""
+        """Parsear fecha con múltiples formatos y convertir a GMT-5"""
         if not date_str:
             return None
             
         for fmt in self.date_formats:
             try:
-                return datetime.strptime(date_str, fmt)
+                parsed_date = datetime.strptime(date_str, fmt)
+                
+                # Si la fecha está en UTC (formato ISO con 'Z')
+                if fmt.endswith('Z'):
+                    utc_date = pytz.utc.localize(parsed_date)
+                    return utc_date.astimezone(self.gmt5)
+                else:
+                    # Asumir que la fecha está en GMT-5 (sin zona horaria)
+                    return self.gmt5.localize(parsed_date)
+                    
             except ValueError:
                 continue
         return None
 
     def process_timing_data(self, data: Dict) -> TimingData:
-        """Procesa los datos de tiempo del webhook"""
+        """Procesa los datos de tiempo con zona horaria GMT-5"""
         timing_data = TimingData()
         timing_data.contact_id = data.get('contact_id')
 
         try:
-            # Procesar fecha de creación
-            creation_str = data.get('date_created') or data.get('Fecha de creación') or data.get('create date')
-            create_date = self.parse_date(creation_str)
+            # Procesar fechas con zona horaria
+            create_date = self.parse_date(data.get('date_created'))
+            first_call_date = self.parse_date(data.get('Fecha/Hora primer llamada'))
             
-            # Procesar fecha de primera llamada
-            first_call_str = data.get('Fecha/Hora primer llamada')
-            first_call_date = self.parse_date(first_call_str)
-            
-            # Calcular diferencia
             if create_date and first_call_date:
+                # Asegurarse de que ambas fechas están en GMT-5
+                create_date = create_date.astimezone(self.gmt5)
+                first_call_date = first_call_date.astimezone(self.gmt5)
+                
                 diferencia = first_call_date - create_date
                 diferencia_minutos = diferencia.total_seconds() / 60
                 
-                self.logger.info(f"Fecha creación contacto: {create_date}")
-                self.logger.info(f"Fecha/Hora primera llamada: {first_call_date}")
-                self.logger.info(f"Tiempo entre creación y primera llamada (minutos): {diferencia_minutos:.2f}")
+                # Registrar fechas ya en GMT-5
+                self.logger.info(f"Fecha creación contacto (GMT-5): {create_date}")
+                self.logger.info(f"Fecha primera llamada (GMT-5): {first_call_date}")
+                self.logger.info(f"Tiempo entre eventos (minutos): {diferencia_minutos:.2f}")
                 
                 timing_data.contact_creation = create_date.isoformat()
                 timing_data.first_call = first_call_date.isoformat()
                 timing_data.time_between_minutes = round(diferencia_minutos, 2)
-            else:
-                if not create_date:
-                    self.logger.warning("Fecha de creación no encontrada")
-                if not first_call_date:
-                    self.logger.warning("Fecha de primera llamada no encontrada")
-                    
+                
         except Exception as e:
             self.logger.error(f"Error procesando fechas: {str(e)}", exc_info=True)
             
@@ -151,58 +149,56 @@ class WebhookServiceDriverUs:
             "https://services.leadconnectorhq.com/hooks/zmN2snXFkGxFawxaNH2Z/webhook-trigger/cb471924-37ca-4e3c-a13d-4c821d851c3e"
         )
         
-        # Formatos de fecha soportados
-        self.date_formats = [
-            '%Y-%m-%dT%H:%M:%S.%fZ',
-            '%m/%d/%Y %H:%M',
-            '%Y-%m-%d',
-            '%m/%d/%Y'
-        ]
+        self.gmt5 = pytz.timezone('America/Bogota')
 
     def parse_dates(self, date_str: str) -> Optional[datetime]:
-        """Parsear fecha con múltiples formatos"""
+        """Parsear fecha con múltiples formatos y convertir a GMT-5"""
         if not date_str:
             return None
             
         for fmt in self.date_formats:
             try:
-                return datetime.strptime(date_str, fmt)
+                parsed_date = datetime.strptime(date_str, fmt)
+                
+                # Si la fecha está en UTC (formato ISO con 'Z')
+                if fmt.endswith('Z'):
+                    utc_date = pytz.utc.localize(parsed_date)
+                    return utc_date.astimezone(self.gmt5)
+                else:
+                    # Asumir que la fecha está en GMT-5 (sin zona horaria)
+                    return self.gmt5.localize(parsed_date)
+                    
             except ValueError:
                 continue
         return None
 
     def process_timing_datas(self, data: Dict) -> TimingData:
-        """Procesa los datos de tiempo del webhook"""
+        """Procesa los datos de tiempo con zona horaria GMT-5"""
         timing_data = TimingData()
         timing_data.contact_id = data.get('contact_id')
 
         try:
-            # Procesar fecha de creación
-            creation_str = data.get('date_created') or data.get('Fecha de creación') or data.get('create date')
-            create_date = self.parse_dates(creation_str)
+            # Procesar fechas con zona horaria
+            create_date = self.parse_date(data.get('date_created'))
+            first_call_date = self.parse_date(data.get('Fecha/Hora primer llamada'))
             
-            # Procesar fecha de primera llamada
-            first_call_str = data.get('Fecha/Hora primer llamada')
-            first_call_date = self.parse_dates(first_call_str)
-            
-            # Calcular diferencia
             if create_date and first_call_date:
+                # Asegurarse de que ambas fechas están en GMT-5
+                create_date = create_date.astimezone(self.gmt5)
+                first_call_date = first_call_date.astimezone(self.gmt5)
+                
                 diferencia = first_call_date - create_date
                 diferencia_minutos = diferencia.total_seconds() / 60
                 
-                self.logger.info(f"Fecha creación contacto: {create_date}")
-                self.logger.info(f"Fecha/Hora primera llamada: {first_call_date}")
-                self.logger.info(f"Tiempo entre creación y primera llamada (minutos): {diferencia_minutos:.2f}")
+                # Registrar fechas ya en GMT-5
+                self.logger.info(f"Fecha creación contacto (GMT-5): {create_date}")
+                self.logger.info(f"Fecha primera llamada (GMT-5): {first_call_date}")
+                self.logger.info(f"Tiempo entre eventos (minutos): {diferencia_minutos:.2f}")
                 
                 timing_data.contact_creation = create_date.isoformat()
                 timing_data.first_call = first_call_date.isoformat()
                 timing_data.time_between_minutes = round(diferencia_minutos, 2)
-            else:
-                if not create_date:
-                    self.logger.warning("Fecha de creación no encontrada")
-                if not first_call_date:
-                    self.logger.warning("Fecha de primera llamada no encontrada")
-                    
+                
         except Exception as e:
             self.logger.error(f"Error procesando fechas: {str(e)}", exc_info=True)
             
