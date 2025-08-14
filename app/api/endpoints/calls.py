@@ -10,7 +10,7 @@ LEADCONNECTOR_API_KEY = "Bearer pit-6cd3fee8-5d37-47e4-b2ea-0cc628ceb84f"
 LEADCONNECTOR_HOST = "services.leadconnectorhq.com"
 LEADCONNECTOR_VERSION = "2021-04-15"
 
-async def get_conversation_messages(conversation_id: str, limit: int = 2):
+async def get_conversation_messages(conversation_id: str, limit: int = 10):  # Aumenté el límite a 10 mensajes
     """Obtiene los mensajes de una conversación específica"""
     try:
         conn = http.client.HTTPSConnection(LEADCONNECTOR_HOST)
@@ -21,7 +21,7 @@ async def get_conversation_messages(conversation_id: str, limit: int = 2):
             'Authorization': LEADCONNECTOR_API_KEY
         }
         
-        logger.info(f"📩 Obteniendo mensajes para conversación: {conversation_id}")
+        logger.info(f"📩 Obteniendo últimos {limit} mensajes para conversación: {conversation_id}")
         conn.request("GET", endpoint, headers=headers)
         
         response = conn.getresponse()
@@ -31,7 +31,9 @@ async def get_conversation_messages(conversation_id: str, limit: int = 2):
             logger.error(f"❌ Error al obtener mensajes: {response.status} - {response_data}")
             return None
         
-        return json.loads(response_data)
+        messages_data = json.loads(response_data)
+        logger.info(f"💬 Mensajes obtenidos: {json.dumps(messages_data, indent=2, ensure_ascii=False)}")
+        return messages_data
     
     except Exception as e:
         logger.error(f"🔥 Error al obtener mensajes: {str(e)}", exc_info=True)
@@ -40,17 +42,14 @@ async def get_conversation_messages(conversation_id: str, limit: int = 2):
 @router.post("/webhook")
 async def receive_webhook(request: Request):    
     try:
-        # 1. Recibir y parsear el payload
         body = await request.body()
         data = json.loads(body)
         logger.info("📥 Payload recibido:\n%s", json.dumps(data, indent=2, ensure_ascii=False))
 
-        # 2. Extraer el contact_id
         contact_id = data.get("contact_id")
         if not contact_id:
             raise HTTPException(status_code=400, detail="El campo contact_id es requerido")
 
-        # 3. Obtener conversaciones del contacto
         conn = http.client.HTTPSConnection(LEADCONNECTOR_HOST)
         endpoint = f"/conversations/search?contactId={contact_id}"
         headers = {
@@ -70,36 +69,38 @@ async def receive_webhook(request: Request):
             )
         
         conversations = json.loads(response_data)
+        logger.info(f"🗂 Conversaciones encontradas: {json.dumps(conversations, indent=2, ensure_ascii=False)}")
         
-        # 4. Verificar si hay conversaciones
         if not conversations.get("conversations"):
             return {
                 "status": "success",
                 "message": "No se encontraron conversaciones",
                 "contact_id": contact_id,
-                "messages": []
+                "conversations": []
             }
         
-        # 5. Obtener la primera conversación y sus mensajes
-        first_conversation = conversations["conversations"][0]
-        conversation_id = first_conversation["id"]
+        enriched_conversations = []
+        for conversation in conversations["conversations"]:
+            conversation_id = conversation["id"]
+            messages = await get_conversation_messages(conversation_id)
+            
+            enriched_conversations.append({
+                "conversation_id": conversation_id,
+                "last_message": conversation.get("lastMessageBody"),
+                "last_message_date": conversation.get("lastMessageDate"),
+                "contact_name": conversation.get("contactName"),
+                "phone": conversation.get("phone"),
+                "messages": messages.get("messages", []) if messages else []
+            })
         
-        messages = await get_conversation_messages(conversation_id)
-        
-        # 6. Preparar respuesta
         response_data = {
             "status": "success",
             "contact_id": contact_id,
-            "conversation_id": conversation_id,
-            "messages": messages if messages else [],
-            "conversation_details": {
-                "last_message": first_conversation.get("lastMessageBody"),
-                "last_message_date": first_conversation.get("lastMessageDate"),
-                "contact_name": first_conversation.get("contactName"),
-                "phone": first_conversation.get("phone")
-            }
+            "conversations": enriched_conversations,
+            "total_conversations": len(enriched_conversations),
+            "message": "Chat obtenido exitosamente"
         }
-        
+
         logger.info("✅ Procesamiento completado para contact_id: %s", contact_id)
         return response_data
 
