@@ -111,7 +111,7 @@ async def receive_webhook(request: Request):
         logger.error(f"Error inesperado: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
     
-@router.post("/webhook_drive_us")
+@router.post("/webhook_dalcava")
 async def receive_webhook(request: Request):    
     try:
         body = await request.body()
