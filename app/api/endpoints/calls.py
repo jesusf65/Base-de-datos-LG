@@ -6,8 +6,9 @@ from app.utils.logger import setup_logger
 router = APIRouter()
 logger = setup_logger("webhook_logger")
 
-LEADCONNECTOR_API_KEY = "Bearer fwnI1qTmRiENU4TmxNZ4" 
+LEADCONNECTOR_API_KEY = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2NhdGlvbl9pZCI6ImZ3bkkxcVRtUmlFTlU0VG14Tlo0IiwidmVyc2lvbiI6MSwiaWF0IjoxNzM5ODkzMzcwNzIzLCJzdWIiOiJyTjlhazB3czJ1YWJUa2tQQllVYiJ9._ES_ynLDP_VKOXvFfNvPgazpdzxxZu41pMkNMDHeCEY" 
 LEADCONNECTOR_HOST = "services.leadconnectorhq.com"
+LEADCONNECTOR_VERSION = "2021-04-15"
 
 @router.post("/webhook")
 async def receive_webhook(request: Request):    
@@ -28,10 +29,11 @@ async def receive_webhook(request: Request):
         endpoint = f"/conversations/search?contactId={contact_id}"
         headers = {
             'Accept': 'application/json',
-            'Authorization': LEADCONNECTOR_API_KEY
+            'Authorization': LEADCONNECTOR_API_KEY,
+            'Version': LEADCONNECTOR_VERSION
         }
         
-        logger.info("🌐 Enviando GET a: %s%s", LEADCONNECTOR_HOST, endpoint)
+        logger.info("🌐 Enviando GET a: %s%s", LEADCONNECTOR_HOST, endpoint, headers)
         conn.request("GET", endpoint, headers=headers)
         
         response = conn.getresponse()
