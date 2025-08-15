@@ -10,46 +10,51 @@ LEADCONNECTOR_API_KEY = "Bearer pit-6cd3fee8-5d37-47e4-b2ea-0cc628ceb84f"
 LEADCONNECTOR_HOST = "services.leadconnectorhq.com"
 LEADCONNECTOR_VERSION = "2021-04-15"
 
-async def get_conversation_messages(conversation_id: str, limit: int = 10):  # Aumenté el límite a 10 mensajes
-    """Obtiene los mensajes de una conversación específica"""
+async def get_inbound_messages(conversation_id: str):
+    """Obtiene SOLO mensajes inbound de una conversación"""
     try:
         conn = http.client.HTTPSConnection(LEADCONNECTOR_HOST)
-        endpoint = f"/conversations/{conversation_id}/messages?limit={limit}"
+        endpoint = f"/conversations/{conversation_id}/messages?limit=50"  # Limite aumentado para asegurar captura
         headers = {
             'Accept': 'application/json',
             'Version': LEADCONNECTOR_VERSION,
             'Authorization': LEADCONNECTOR_API_KEY
         }
         
-        logger.info(f"📩 Obteniendo últimos {limit} mensajes para conversación: {conversation_id}")
         conn.request("GET", endpoint, headers=headers)
-        
         response = conn.getresponse()
-        response_data = response.read().decode("utf-8")
+        response_data = json.loads(response.read().decode("utf-8"))
         
         if response.status >= 400:
-            logger.error(f"❌ Error al obtener mensajes: {response.status} - {response_data}")
+            logger.error(f"Error al obtener mensajes: {response.status}")
             return None
         
-        messages_data = json.loads(response_data)
-        logger.info(f"💬 Mensajes obtenidos: {json.dumps(messages_data, indent=2, ensure_ascii=False)}")
-        return messages_data
+        # Filtrar SOLO mensajes inbound
+        inbound_messages = [
+            msg for msg in response_data.get("messages", [])
+            if msg.get("direction") == "inbound"
+        ]
+        
+        logger.info(f"📨 Mensajes inbound encontrados: {len(inbound_messages)}")
+        return inbound_messages
     
     except Exception as e:
-        logger.error(f"🔥 Error al obtener mensajes: {str(e)}", exc_info=True)
+        logger.error(f"Error al obtener mensajes: {str(e)}")
         return None
 
 @router.post("/webhook")
 async def receive_webhook(request: Request):    
     try:
+        # 1. Procesar payload
         body = await request.body()
         data = json.loads(body)
-        logger.info("📥 Payload recibido:\n%s", json.dumps(data, indent=2, ensure_ascii=False))
-
+        
+        # 2. Validar contact_id
         contact_id = data.get("contact_id")
         if not contact_id:
-            raise HTTPException(status_code=400, detail="El campo contact_id es requerido")
+            raise HTTPException(status_code=400, detail="contact_id es requerido")
 
+        # 3. Obtener conversaciones
         conn = http.client.HTTPSConnection(LEADCONNECTOR_HOST)
         endpoint = f"/conversations/search?contactId={contact_id}"
         headers = {
@@ -60,52 +65,41 @@ async def receive_webhook(request: Request):
         
         conn.request("GET", endpoint, headers=headers)
         response = conn.getresponse()
-        response_data = response.read().decode("utf-8")
-        
-        if response.status >= 400:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Error al consultar conversaciones: {response.status}"
-            )
-        
-        conversations = json.loads(response_data)
-        logger.info(f"🗂 Conversaciones encontradas: {json.dumps(conversations, indent=2, ensure_ascii=False)}")
+        conversations = json.loads(response.read().decode("utf-8"))
         
         if not conversations.get("conversations"):
             return {
                 "status": "success",
                 "message": "No se encontraron conversaciones",
                 "contact_id": contact_id,
-                "conversations": []
+                "inbound_messages": []
             }
+
+        # 4. Procesar cada conversación
+        all_inbound_messages = []
+        for conv in conversations["conversations"]:
+            messages = await get_inbound_messages(conv["id"])
+            if messages:
+                all_inbound_messages.extend(messages)
         
-        enriched_conversations = []
-        for conversation in conversations["conversations"]:
-            conversation_id = conversation["id"]
-            messages = await get_conversation_messages(conversation_id)
-            
-            enriched_conversations.append({
-                "conversation_id": conversation_id,
-                "last_message": conversation.get("lastMessageBody"),
-                "last_message_date": conversation.get("lastMessageDate"),
-                "contact_name": conversation.get("contactName"),
-                "phone": conversation.get("phone"),
-                "messages": messages.get("messages", []) if messages else []
-            })
+        # 5. Ordenar mensajes por fecha (más reciente primero)
+        sorted_messages = sorted(
+            all_inbound_messages,
+            key=lambda x: x.get("dateAdded", ""),
+            reverse=True
+        )
         
-        response_data = {
+        # 6. Formatear respuesta
+        return {
             "status": "success",
             "contact_id": contact_id,
-            "conversations": enriched_conversations,
-            "total_conversations": len(enriched_conversations),
-            "message": "Chat obtenido exitosamente"
+            "total_inbound_messages": len(sorted_messages),
+            "inbound_messages": sorted_messages,
+            "message": "Mensajes inbound obtenidos exitosamente"
         }
 
-        logger.info("✅ Procesamiento completado para contact_id: %s", contact_id)
-        return response_data
-
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Formato JSON inválido")
+        raise HTTPException(status_code=400, detail="JSON inválido")
     except Exception as e:
-        logger.error(f"Error crítico: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error interno del servidor")
+        logger.error(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error interno")
