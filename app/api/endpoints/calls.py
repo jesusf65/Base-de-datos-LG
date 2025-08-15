@@ -97,14 +97,14 @@ async def receive_webhook(request: Request):
 
             inbound_messages = []
             source_ids_found = []
-            found_first_source_id = False  # <-- bandera para detener búsqueda
+            found_first_source_id = False  # <-- bandera para detener búsqueda después del primer sourceId
 
             if messages_data and "messages" in messages_data:
                 logger.info(f"📨 Estructura de mensajes recibida: {json.dumps(messages_data['messages'], indent=2, ensure_ascii=False)}")
 
                 for msg in messages_data["messages"]:
                     if found_first_source_id:
-                        break # ya encontramos el primero, no seguimos revisando
+                        break  # Ya encontramos el primer sourceId, no seguimos revisando
 
                     # Caso: mensaje es un diccionario
                     if isinstance(msg, dict):
@@ -148,7 +148,7 @@ async def receive_webhook(request: Request):
         }
 
         if all_source_ids:
-            logger.info(f"🔍 Los SOURCE ID del contacto son: {', '.join(all_source_ids)}")
+            logger.info(f"🔍 Primer SOURCE ID del contacto encontrado: {', '.join(all_source_ids)}")
         else:
             logger.info("⚠️ No se encontró un SOURCE ID en los mensajes inbound.")
 
