@@ -99,13 +99,21 @@ async def receive_webhook(request: Request):
             source_ids_found = []
 
             if messages_data and "messages" in messages_data:
-                logger.info(f"📨 Estructura de mensajes recibida: {json.dumps(messages_data['messages'], indent=2, ensure_ascii=False)}")
+                logger.info(f"📨 Total de mensajes recibidos: {len(messages_data['messages'])}")
 
-                for msg in messages_data["messages"]:
+                # INVERTIR el orden: del más antiguo al más reciente
+                # Esto hace que el primer sourceId encontrado sea el original
+                reversed_messages = list(reversed(messages_data["messages"]))
+                logger.info(f"📨 Mensajes reordenados del más antiguo al más reciente")
+
+                # Procesar mensajes desde el más antiguo
+                for msg in reversed_messages:
+                    source_id_found = None
+                    
+                    # Procesar mensajes tipo dict con direction inbound
                     if isinstance(msg, dict) and msg.get("direction") == "inbound":
                         inbound_messages.append(msg)
                         body = msg.get("body", "")
-                        
                         logger.info(f"🔍 Analizando mensaje inbound: {msg.get('id', 'sin-id')} - Body: {body[:100]}...")
                         
                         patterns = [
@@ -114,20 +122,14 @@ async def receive_webhook(request: Request):
                             r"source_id\s*:\s*(\S+)",         # source_id: valor
                         ]
                         
-                        source_id_found = None
                         for pattern in patterns:
                             match = re.search(pattern, body, re.IGNORECASE)
                             if match:
                                 source_id_found = match.group(1)
                                 logger.info(f"🎯 SOURCE ID encontrado con patrón '{pattern}': {source_id_found}")
                                 break
-                        
-                        if source_id_found:
-                            source_ids_found.append(source_id_found)
-                            all_source_ids.add(source_id_found)
-                            # No hacer break aquí - seguir procesando para encontrar todos
-                    
-                    # Caso: mensaje es texto plano (por si acaso)
+                                
+                    # Procesar mensajes tipo string (por si acaso)
                     elif isinstance(msg, str):
                         logger.info(f"🔍 Mensaje en formato string: {msg[:100]}...")
                         patterns = [
@@ -136,20 +138,22 @@ async def receive_webhook(request: Request):
                             r"source_id\s*:\s*(\S+)",
                         ]
                         
-                        source_id_found = None
                         for pattern in patterns:
                             match = re.search(pattern, msg, re.IGNORECASE)
                             if match:
                                 source_id_found = match.group(1)
                                 logger.info(f"🎯 SOURCE ID encontrado en string: {source_id_found}")
                                 break
-                        
-                        if source_id_found:
-                            source_ids_found.append(source_id_found)
-                            all_source_ids.add(source_id_found)
+                    
+                    # Si encontramos un sourceId, lo agregamos y detenemos la búsqueda
+                    if source_id_found:
+                        source_ids_found.append(source_id_found)
+                        all_source_ids.add(source_id_found)
+                        logger.info(f"✅ Primer sourceId encontrado, deteniendo búsqueda")
+                        break
 
-            # Si encontramos múltiples sourceIds, tomar el último (más antiguo)
-            final_source_ids = source_ids_found[-1:] if source_ids_found else []
+            # Tomar solo el primer sourceId encontrado (el más antiguo)
+            final_source_ids = source_ids_found[:1] if source_ids_found else []
 
             enriched_conversations.append({
                 "conversation_id": conversation_id,
