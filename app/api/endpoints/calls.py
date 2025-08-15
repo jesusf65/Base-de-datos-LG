@@ -95,7 +95,10 @@ async def receive_webhook(request: Request):
             conversation_id = conversation["id"]
             messages_data = await get_conversation_messages(conversation_id)
 
+            # Inicializar listas separadas por tipo de mensaje
             inbound_messages = []
+            outbound_messages = []
+            all_messages = []
             source_ids_found = []
 
             if messages_data and "messages" in messages_data:
@@ -106,44 +109,41 @@ async def receive_webhook(request: Request):
                 reversed_messages = list(reversed(messages_data["messages"]))
                 logger.info(f"📨 Mensajes reordenados del más antiguo al más reciente")
 
-                # Procesar mensajes desde el más antiguo
-                for msg in reversed_messages:
-                    source_id_found = None
+                # Separar mensajes en listas diferentes
+                for message in reversed_messages:
+                    if isinstance(message, dict):
+                        body = message.get("body", "")
+                        direction = message.get("direction", "")
+                        
+                        # Agregar a la lista general
+                        all_messages.append(message)
+                        
+                        # Separar por inbound y outbound
+                        if direction == "inbound":
+                            inbound_messages.append(message)
+                        elif direction == "outbound":
+                            outbound_messages.append(message)
+
+                logger.info(f"📊 Mensajes separados - Inbound: {len(inbound_messages)}, Outbound: {len(outbound_messages)}")
+
+                # Procesar solo mensajes INBOUND para buscar sourceId
+                for msg in inbound_messages:
+                    body = msg.get("body", "")
+                    logger.info(f"🔍 Analizando mensaje inbound: {msg.get('id', 'sin-id')} - Body: {body[:100]}...")
                     
-                    # Procesar mensajes tipo dict con direction inbound
-                    if isinstance(msg, dict) and msg.get("direction") == "inbound":
-                        inbound_messages.append(msg)
-                        body = msg.get("body", "")
-                        logger.info(f"🔍 Analizando mensaje inbound: {msg.get('id', 'sin-id')} - Body: {body[:100]}...")
-                        
-                        patterns = [
-                            r"sourceId\s*:\s*(\S+)",           # sourceId: valor
-                            r"sourceid\s*:\s*(\S+)",          # sourceid: valor (case insensitive)
-                            r"source_id\s*:\s*(\S+)",         # source_id: valor
-                        ]
-                        
-                        for pattern in patterns:
-                            match = re.search(pattern, body, re.IGNORECASE)
-                            if match:
-                                source_id_found = match.group(1)
-                                logger.info(f"🎯 SOURCE ID encontrado con patrón '{pattern}': {source_id_found}")
-                                break
-                                
-                    # Procesar mensajes tipo string (por si acaso)
-                    elif isinstance(msg, str):
-                        logger.info(f"🔍 Mensaje en formato string: {msg[:100]}...")
-                        patterns = [
-                            r"sourceId\s*:\s*(\S+)",
-                            r"sourceid\s*:\s*(\S+)",
-                            r"source_id\s*:\s*(\S+)",
-                        ]
-                        
-                        for pattern in patterns:
-                            match = re.search(pattern, msg, re.IGNORECASE)
-                            if match:
-                                source_id_found = match.group(1)
-                                logger.info(f"🎯 SOURCE ID encontrado en string: {source_id_found}")
-                                break
+                    patterns = [
+                        r"sourceId\s*:\s*(\S+)",           # sourceId: valor
+                        r"sourceid\s*:\s*(\S+)",          # sourceid: valor (case insensitive)
+                        r"source_id\s*:\s*(\S+)",         # source_id: valor
+                    ]
+                    
+                    source_id_found = None
+                    for pattern in patterns:
+                        match = re.search(pattern, body, re.IGNORECASE)
+                        if match:
+                            source_id_found = match.group(1)
+                            logger.info(f"🎯 SOURCE ID encontrado con patrón '{pattern}': {source_id_found}")
+                            break
                     
                     # Si encontramos un sourceId, lo agregamos y detenemos la búsqueda
                     if source_id_found:
