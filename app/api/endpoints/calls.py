@@ -97,47 +97,59 @@ async def receive_webhook(request: Request):
 
             inbound_messages = []
             source_ids_found = []
-            found_first_source_id = False
 
             if messages_data and "messages" in messages_data:
                 logger.info(f"📨 Estructura de mensajes recibida: {json.dumps(messages_data['messages'], indent=2, ensure_ascii=False)}")
 
                 for msg in messages_data["messages"]:
                     if isinstance(msg, dict) and msg.get("direction") == "inbound":
+                        inbound_messages.append(msg)
                         body = msg.get("body", "")
-                        match = re.search(r"sourceId\s*:\s*(\S+)", body)
-                        if match:
-                            source_ids_found.append(match.group(1))
-                            
-                            # CORRECCIÓN: Buscar tanto 'sourceid' como 'sourceId'
-                            match = re.search(r"sourceid\s*:\s*(\S+)", body, re.IGNORECASE)
-                            if not match:
-                                # Si no encuentra 'sourceid', busca 'sourceId' (con I mayúscula)
-                                match = re.search(r"sourceId\s*:\s*(\S+)", body)
-                            
-                            if match:
-                                sid = match.group(1)
-                                source_ids_found.append(sid)
-                                all_source_ids.add(sid)
-                                found_first_source_id = True
-                                logger.info(f"🎯 SOURCE ID encontrado en mensaje: {sid}")
-                                # Solo salir del loop cuando encontremos un sourceId
-                                break
-
-                    # Caso: mensaje es texto plano
-                    elif isinstance(msg, str):
-                        inbound_messages.append({"raw": msg})
-                        match = re.search(r"sourceid\s*:\s*(\S+)", msg, re.IGNORECASE)
-                        if not match:
-                            match = re.search(r"sourceId\s*:\s*(\S+)", msg)
                         
-                        if match:
-                            sid = match.group(1)
-                            source_ids_found.append(sid)
-                            all_source_ids.add(sid)
-                            found_first_source_id = True
-                            logger.info(f"🎯 SOURCE ID encontrado en texto: {sid}")
-                            break
+                        logger.info(f"🔍 Analizando mensaje inbound: {msg.get('id', 'sin-id')} - Body: {body[:100]}...")
+                        
+                        patterns = [
+                            r"sourceId\s*:\s*(\S+)",           # sourceId: valor
+                            r"sourceid\s*:\s*(\S+)",          # sourceid: valor (case insensitive)
+                            r"source_id\s*:\s*(\S+)",         # source_id: valor
+                        ]
+                        
+                        source_id_found = None
+                        for pattern in patterns:
+                            match = re.search(pattern, body, re.IGNORECASE)
+                            if match:
+                                source_id_found = match.group(1)
+                                logger.info(f"🎯 SOURCE ID encontrado con patrón '{pattern}': {source_id_found}")
+                                break
+                        
+                        if source_id_found:
+                            source_ids_found.append(source_id_found)
+                            all_source_ids.add(source_id_found)
+                            # No hacer break aquí - seguir procesando para encontrar todos
+                    
+                    # Caso: mensaje es texto plano (por si acaso)
+                    elif isinstance(msg, str):
+                        logger.info(f"🔍 Mensaje en formato string: {msg[:100]}...")
+                        patterns = [
+                            r"sourceId\s*:\s*(\S+)",
+                            r"sourceid\s*:\s*(\S+)",
+                            r"source_id\s*:\s*(\S+)",
+                        ]
+                        
+                        source_id_found = None
+                        for pattern in patterns:
+                            match = re.search(pattern, msg, re.IGNORECASE)
+                            if match:
+                                source_id_found = match.group(1)
+                                logger.info(f"🎯 SOURCE ID encontrado en string: {source_id_found}")
+                                break
+                        
+                        if source_id_found:
+                            source_ids_found.append(source_id_found)
+                            all_source_ids.add(source_id_found)
+
+            # Si encontramos múltiples sourceIds, tomar el último (más antiguo)
+            final_source_ids = source_ids_found[-1:] if source_ids_found else []
 
             enriched_conversations.append({
                 "conversation_id": conversation_id,
@@ -146,7 +158,8 @@ async def receive_webhook(request: Request):
                 "contact_name": conversation.get("contactName"),
                 "phone": conversation.get("phone"),
                 "messages": inbound_messages,
-                "source_ids": source_ids_found
+                "source_ids": final_source_ids,
+                "total_inbound_messages": len(inbound_messages)
             })
 
         response_data = {
