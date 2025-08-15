@@ -123,8 +123,19 @@ async def receive_webhook(request: Request):
                 if isinstance(messages_data, dict):
                     # Buscar en diferentes posibles keys
                     if "messages" in messages_data:
-                        messages_list = messages_data["messages"]
-                        logger.info(f"📨 Usando 'messages' key, tipo: {type(messages_list)}, longitud: {len(messages_list) if isinstance(messages_list, list) else 'no es lista'}")
+                        # Verificar si messages_data["messages"] es dict o list
+                        messages_obj = messages_data["messages"]
+                        if isinstance(messages_obj, dict) and "messages" in messages_obj:
+                            # Estructura anidada: messages.messages
+                            messages_list = messages_obj["messages"]
+                            logger.info(f"📨 Usando estructura anidada messages.messages, tipo: {type(messages_list)}, longitud: {len(messages_list) if isinstance(messages_list, list) else 'no es lista'}")
+                        elif isinstance(messages_obj, list):
+                            # Estructura directa: messages es una lista
+                            messages_list = messages_obj
+                            logger.info(f"📨 Usando 'messages' key directamente, tipo: {type(messages_list)}, longitud: {len(messages_list)}")
+                        else:
+                            logger.warning(f"📨 'messages' key no contiene estructura esperada. Tipo: {type(messages_obj)}")
+                            messages_list = [messages_obj] if messages_obj else []
                     elif "data" in messages_data:
                         messages_list = messages_data["data"]
                         logger.info(f"📨 Usando 'data' key, tipo: {type(messages_list)}")
@@ -211,13 +222,14 @@ async def receive_webhook(request: Request):
                         body = msg.get("body", "")
                         logger.info(f"🔍 Analizando mensaje inbound: {msg.get('id', 'sin-id')} - Body: {body[:100]}...")
                         
-                        # Patrones más amplios para capturar sourceId
+                        # Patrones específicos para capturar sourceId de ads
                         patterns = [
-                            r"sourceId\s*:\s*(\S+)",           # sourceId: valor
-                            r"sourceid\s*:\s*(\S+)",          # sourceid: valor (case insensitive)
-                            r"source_id\s*:\s*(\S+)",         # source_id: valor
-                            r"source\s*:\s*(\S+)",            # source: valor
-                            r"Source\s*:\s*(\S+)",            # Source: valor
+                            r"sourceId\s*:\s*(\d+)",             # sourceId: 120225815911820692 (números)
+                            r"sourceid\s*:\s*(\d+)",            # sourceid: números (case insensitive)  
+                            r"source_id\s*:\s*(\d+)",           # source_id: números
+                            r"sourceId\s*:\s*([a-zA-Z0-9_-]+)", # sourceId: cualquier alfanumérico
+                            r"sourceid\s*:\s*([a-zA-Z0-9_-]+)", # sourceid: cualquier alfanumérico
+                            r"source_id\s*:\s*([a-zA-Z0-9_-]+)" # source_id: cualquier alfanumérico
                         ]
                         
                         source_id_found = None
@@ -232,10 +244,10 @@ async def receive_webhook(request: Request):
                         if source_id_found:
                             source_ids_found.append(source_id_found)
                             all_source_ids.add(source_id_found)
-                            logger.info(f"✅ Primer sourceId encontrado, deteniendo búsqueda")
+                            logger.info(f"✅ SourceId encontrado en mensaje inbound: {source_id_found}")
                             break
                     
-                    # También buscar en mensajes OUTBOUND si no encontramos en inbound
+                    # Si no encontramos sourceId en inbound, buscar también en outbound como respaldo
                     if not source_ids_found:
                         logger.info(f"🔍 No se encontró sourceId en inbound, buscando en outbound...")
                         for msg in outbound_messages:
@@ -243,11 +255,12 @@ async def receive_webhook(request: Request):
                             logger.info(f"🔍 Analizando mensaje outbound: {msg.get('id', 'sin-id')} - Body: {body[:100]}...")
                             
                             patterns = [
-                                r"sourceId\s*:\s*(\S+)",
-                                r"sourceid\s*:\s*(\S+)",
-                                r"source_id\s*:\s*(\S+)",
-                                r"source\s*:\s*(\S+)",
-                                r"Source\s*:\s*(\S+)",
+                                r"sourceId\s*:\s*(\d+)",             # sourceId: números
+                                r"sourceid\s*:\s*(\d+)",            # sourceid: números
+                                r"source_id\s*:\s*(\d+)",           # source_id: números
+                                r"sourceId\s*:\s*([a-zA-Z0-9_-]+)", # sourceId: alfanumérico
+                                r"sourceid\s*:\s*([a-zA-Z0-9_-]+)", # sourceid: alfanumérico
+                                r"source_id\s*:\s*([a-zA-Z0-9_-]+)" # source_id: alfanumérico
                             ]
                             
                             source_id_found = None
@@ -261,7 +274,7 @@ async def receive_webhook(request: Request):
                             if source_id_found:
                                 source_ids_found.append(source_id_found)
                                 all_source_ids.add(source_id_found)
-                                logger.info(f"✅ SourceId encontrado en outbound, deteniendo búsqueda")
+                                logger.info(f"✅ SourceId encontrado en mensaje outbound: {source_id_found}")
                                 break
                 else:
                     logger.warning(f"⚠️ No se pudo extraer lista de mensajes de la respuesta")
