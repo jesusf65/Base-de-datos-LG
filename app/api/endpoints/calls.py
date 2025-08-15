@@ -89,13 +89,22 @@ async def receive_webhook(request: Request):
             source_ids_found = []
 
             if messages_data and "messages" in messages_data:
+                logger.info(f"📨 Estructura de mensajes recibida: {json.dumps(messages_data['messages'], indent=2, ensure_ascii=False)}")
                 for msg in messages_data["messages"]:
-                    if msg.get("direction") == "inbound":
-                        inbound_messages.append(msg)
-
-                        # Buscar sourceId en el cuerpo del mensaje
-                        body = msg.get("body", "")
-                        match = re.search(r"sourceId:\s*(\S+)", body)
+                    if isinstance(msg, dict):
+                        # Caso normal: mensaje es un dict
+                        if msg.get("direction") == "inbound":
+                            inbound_messages.append(msg)
+                            body = msg.get("body", "")
+                            match = re.search(r"sourceId:\s*(\S+)", body)
+                            if match:
+                                sid = match.group(1)
+                                source_ids_found.append(sid)
+                                all_source_ids.add(sid)
+                    elif isinstance(msg, str):
+                        # Caso raro: mensaje es texto plano
+                        inbound_messages.append({"raw": msg})
+                        match = re.search(r"sourceId:\s*(\S+)", msg)
                         if match:
                             sid = match.group(1)
                             source_ids_found.append(sid)
