@@ -341,7 +341,7 @@ async def receive_webhook(request: Request):
                 "total_messages": len(all_messages)
             })
 
-        response_data = {
+            response_data = {
             "status": "success",
             "contact_id": contact_id,
             "source_ids_contact": list(all_source_ids),
@@ -352,6 +352,41 @@ async def receive_webhook(request: Request):
 
         if all_source_ids:
             logger.info(f"🔍 SOURCE ID(s) del contacto encontrado(s): {', '.join(all_source_ids)}")
+            
+            # Tomar el primer sourceId encontrado (el más antiguo)
+            source_id_to_send = list(all_source_ids)[0]
+            
+            # Configurar la conexión para enviar el sourceId al webhook
+            target_webhook_url = "https://services.leadconnectorhq.com/hooks/fwnI1qTmRiENU4TmxNZ4/webhook-trigger/5f0d133c-be2f-4d8e-928a-f6dc386fc73f"
+            target_host = "services.leadconnectorhq.com"
+            target_endpoint = "/hooks/fwnI1qTmRiENU4TmxNZ4/webhook-trigger/5f0d133c-be2f-4d8e-928a-f6dc386fc73f"
+            
+            try:
+                conn = http.client.HTTPSConnection(target_host)
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Version": LEADCONNECTOR_VERSION,
+                    "Authorization": LEADCONNECTOR_API_KEY
+                }
+                
+                payload = json.dumps({
+                    "sourceId": source_id_to_send
+                })
+                
+                logger.info(f"📤 Enviando sourceId al webhook externo: {source_id_to_send}")
+                conn.request("POST", target_endpoint, body=payload, headers=headers)
+                
+                response = conn.getresponse()
+                response_data_webhook = response.read().decode("utf-8")
+                
+                if response.status >= 400:
+                    logger.error(f"❌ Error al enviar al webhook externo: {response.status} - {response_data_webhook}")
+                else:
+                    logger.info(f"✅ SourceId enviado exitosamente al webhook externo. Respuesta: {response_data_webhook}")
+                    
+            except Exception as e:
+                logger.error(f"🔥 Error al enviar al webhook externo: {str(e)}", exc_info=True)
         else:
             logger.info("⚠️ No se encontró ningún SOURCE ID en los mensajes inbound ni outbound.")
 
