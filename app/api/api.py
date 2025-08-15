@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.endpoints.calls import router as router_calls
+from app.api.endpoints.webhook import router as router_calls
 from app.api.endpoints.health_check import router as router_check    
 
 api_router = APIRouter()
