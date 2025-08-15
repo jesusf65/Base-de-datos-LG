@@ -33,7 +33,6 @@ async def get_conversation_messages(conversation_id: str, limit: int = 10):
             return None
         
         messages_data = json.loads(response_data)
-        logger.info(f"💬 Mensajes obtenidos: {json.dumps(messages_data, indent=2, ensure_ascii=False)}")
         return messages_data
     
     except Exception as e:
@@ -45,7 +44,6 @@ async def receive_webhook(request: Request):
     try:
         body = await request.body()
         data = json.loads(body)
-        logger.info("📥 Payload recibido:\n%s", json.dumps(data, indent=2, ensure_ascii=False))
 
         contact_id = data.get("contact_id")
         if not contact_id:
