@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 import json
 import http.client
+import re
 from app.utils.logger import setup_logger
 
 router = APIRouter()
@@ -10,66 +11,46 @@ LEADCONNECTOR_API_KEY = "Bearer pit-6cd3fee8-5d37-47e4-b2ea-0cc628ceb84f"
 LEADCONNECTOR_HOST = "services.leadconnectorhq.com"
 LEADCONNECTOR_VERSION = "2021-04-15"
 
-async def get_inbound_messages(conversation_id: str):
-    """Obtiene SOLO mensajes inbound de una conversación"""
+async def get_conversation_messages(conversation_id: str, limit: int = 10):
+    """Obtiene los mensajes de una conversación específica"""
     try:
         conn = http.client.HTTPSConnection(LEADCONNECTOR_HOST)
-        endpoint = f"/conversations/{conversation_id}/messages?limit=4"
+        endpoint = f"/conversations/{conversation_id}/messages?limit={limit}"
         headers = {
             'Accept': 'application/json',
             'Version': LEADCONNECTOR_VERSION,
             'Authorization': LEADCONNECTOR_API_KEY
         }
         
+        logger.info(f"📩 Obteniendo últimos {limit} mensajes para conversación: {conversation_id}")
         conn.request("GET", endpoint, headers=headers)
+        
         response = conn.getresponse()
         response_data = response.read().decode("utf-8")
         
-        # Asegurarse de parsear correctamente el JSON
-        try:
-            messages_data = json.loads(response_data)
-        except json.JSONDecodeError:
-            logger.error(f"Respuesta no es JSON válido: {response_data}")
-            return None
-            
         if response.status >= 400:
-            logger.error(f"Error en API: {response.status} - {messages_data.get('message')}")
+            logger.error(f"❌ Error al obtener mensajes: {response.status} - {response_data}")
             return None
         
-        # Verificar estructura esperada
-        if not isinstance(messages_data, dict) or 'messages' not in messages_data:
-            logger.error(f"Estructura inesperada en respuesta: {messages_data}")
-            return None
-            
-        # Filtrar SOLO mensajes inbound
-        inbound_messages = [
-            msg for msg in messages_data['messages']
-            if isinstance(msg, dict) and msg.get("direction") == "inbound"
-        ]
-        
-        logger.info(f"📨 Mensajes inbound encontrados: {len(inbound_messages)}")
-        return inbound_messages
+        messages_data = json.loads(response_data)
+        logger.info(f"💬 Mensajes obtenidos: {json.dumps(messages_data, indent=2, ensure_ascii=False)}")
+        return messages_data
     
     except Exception as e:
-        logger.error(f"Error al obtener mensajes: {str(e)}", exc_info=True)
+        logger.error(f"🔥 Error al obtener mensajes: {str(e)}", exc_info=True)
         return None
 
 @router.post("/webhook")
 async def receive_webhook(request: Request):    
     try:
-        # 1. Procesar payload
         body = await request.body()
-        try:
-            data = json.loads(body)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="JSON inválido")
+        data = json.loads(body)
+        logger.info("📥 Payload recibido:\n%s", json.dumps(data, indent=2, ensure_ascii=False))
 
-        # 2. Validar contact_id
         contact_id = data.get("contact_id")
         if not contact_id:
-            raise HTTPException(status_code=400, detail="contact_id es requerido")
+            raise HTTPException(status_code=400, detail="El campo contact_id es requerido")
 
-        # 3. Obtener conversaciones
         conn = http.client.HTTPSConnection(LEADCONNECTOR_HOST)
         endpoint = f"/conversations/search?contactId={contact_id}"
         headers = {
@@ -82,47 +63,75 @@ async def receive_webhook(request: Request):
         response = conn.getresponse()
         response_data = response.read().decode("utf-8")
         
-        try:
-            conversations = json.loads(response_data)
-        except json.JSONDecodeError:
-            logger.error(f"Respuesta de conversaciones no es JSON válido: {response_data}")
-            raise HTTPException(status_code=502, detail="Error en formato de respuesta")
+        if response.status >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Error al consultar conversaciones: {response.status}"
+            )
         
-        if not isinstance(conversations, dict) or not conversations.get("conversations"):
+        conversations = json.loads(response_data)
+        logger.info(f"🗂 Conversaciones encontradas: {json.dumps(conversations, indent=2, ensure_ascii=False)}")
+        
+        if not conversations.get("conversations"):
             return {
                 "status": "success",
                 "message": "No se encontraron conversaciones",
                 "contact_id": contact_id,
-                "inbound_messages": []
+                "conversations": []
             }
+        
+        enriched_conversations = []
+        all_source_ids = set()
 
-        # 4. Procesar cada conversación
-        all_inbound_messages = []
-        for conv in conversations["conversations"]:
-            if not isinstance(conv, dict):
-                continue
-                
-            messages = await get_inbound_messages(conv.get("id"))
-            if messages:
-                all_inbound_messages.extend(messages)
-        
-        # 5. Ordenar mensajes por fecha (más reciente primero)
-        sorted_messages = sorted(
-            [msg for msg in all_inbound_messages if isinstance(msg, dict)],
-            key=lambda x: x.get("dateAdded", ""),
-            reverse=True
-        )
-        
-        # 6. Formatear respuesta
-        return {
+        for conversation in conversations["conversations"]:
+            conversation_id = conversation["id"]
+            messages_data = await get_conversation_messages(conversation_id)
+
+            inbound_messages = []
+            source_ids_found = []
+
+            if messages_data and "messages" in messages_data:
+                for msg in messages_data["messages"]:
+                    if msg.get("direction") == "inbound":
+                        inbound_messages.append(msg)
+
+                        # Buscar sourceId en el cuerpo del mensaje
+                        body = msg.get("body", "")
+                        match = re.search(r"sourceId:\s*(\S+)", body)
+                        if match:
+                            sid = match.group(1)
+                            source_ids_found.append(sid)
+                            all_source_ids.add(sid)
+
+            enriched_conversations.append({
+                "conversation_id": conversation_id,
+                "last_message": conversation.get("lastMessageBody"),
+                "last_message_date": conversation.get("lastMessageDate"),
+                "contact_name": conversation.get("contactName"),
+                "phone": conversation.get("phone"),
+                "messages": inbound_messages,
+                "source_ids": source_ids_found
+            })
+
+        response_data = {
             "status": "success",
             "contact_id": contact_id,
-            "total_inbound_messages": len(sorted_messages),
-            "inbound_messages": sorted_messages
+            "source_ids_contact": list(all_source_ids),
+            "conversations": enriched_conversations,
+            "total_conversations": len(enriched_conversations),
+            "message": "Chat obtenido exitosamente"
         }
 
-    except HTTPException:
-        raise
+        if all_source_ids:
+            logger.info(f"🔍 Los SOURCE ID del contacto son: {', '.join(all_source_ids)}")
+        else:
+            logger.info("⚠️ No se encontró un SOURCE ID en los mensajes inbound.")
+
+        logger.info("✅ Procesamiento completado para contact_id: %s", contact_id)
+        return response_data
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Formato JSON inválido")
     except Exception as e:
         logger.error(f"Error crítico: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor")
