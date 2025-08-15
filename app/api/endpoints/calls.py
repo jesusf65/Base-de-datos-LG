@@ -103,14 +103,11 @@ async def receive_webhook(request: Request):
                 logger.info(f"📨 Estructura de mensajes recibida: {json.dumps(messages_data['messages'], indent=2, ensure_ascii=False)}")
 
                 for msg in messages_data["messages"]:
-                    if found_first_source_id:
-                        break
-
-                    # Caso: mensaje es un diccionario
-                    if isinstance(msg, dict):
-                        if msg.get("direction") == "inbound":
-                            inbound_messages.append(msg)
-                            body = msg.get("body", "")
+                    if isinstance(msg, dict) and msg.get("direction") == "inbound":
+                        body = msg.get("body", "")
+                        match = re.search(r"sourceId\s*:\s*(\S+)", body)
+                        if match:
+                            source_ids_found.append(match.group(1))
                             
                             # CORRECCIÓN: Buscar tanto 'sourceid' como 'sourceId'
                             match = re.search(r"sourceid\s*:\s*(\S+)", body, re.IGNORECASE)
@@ -124,6 +121,8 @@ async def receive_webhook(request: Request):
                                 all_source_ids.add(sid)
                                 found_first_source_id = True
                                 logger.info(f"🎯 SOURCE ID encontrado en mensaje: {sid}")
+                                # Solo salir del loop cuando encontremos un sourceId
+                                break
 
                     # Caso: mensaje es texto plano
                     elif isinstance(msg, str):
@@ -138,6 +137,7 @@ async def receive_webhook(request: Request):
                             all_source_ids.add(sid)
                             found_first_source_id = True
                             logger.info(f"🎯 SOURCE ID encontrado en texto: {sid}")
+                            break
 
             enriched_conversations.append({
                 "conversation_id": conversation_id,
