@@ -224,28 +224,50 @@ async def receive_webhook(request: Request):
                         
                         # Patrones específicos para capturar sourceId de ads
                         patterns = [
-                            r"sourceId\s*:\s*(\d+)",             # sourceId: 120225815911820692 (números)
-                            r"sourceid\s*:\s*(\d+)",            # sourceid: números (case insensitive)  
-                            r"source_id\s*:\s*(\d+)",           # source_id: números
-                            r"sourceId\s*:\s*([a-zA-Z0-9_-]+)", # sourceId: cualquier alfanumérico
-                            r"sourceid\s*:\s*([a-zA-Z0-9_-]+)", # sourceid: cualquier alfanumérico
-                            r"source_id\s*:\s*([a-zA-Z0-9_-]+)" # source_id: cualquier alfanumérico
+                            # Patrones más específicos primero
+                            r"sourceId\s*:\s*\"([^\"]+)\"",        # sourceId: "valor entre comillas"
+                            r"sourceId\s*:\s*'([^']+)'",          # sourceId: 'valor entre comillas simples'
+                            r"sourceId\s*:\s*(\d+)",              # sourceId: 120225815911820692 (solo números)
+                            r"sourceId\s*:\s*([a-zA-Z0-9_-]+)",   # sourceId: alfanumérico con _ y -
+                            r"sourceId\s*:\s*([^\s\n,]+)",        # sourceId: cualquier valor sin espacios, saltos o comas
+                            
+                            # Variaciones con case insensitive
+                            r"sourceid\s*:\s*\"([^\"]+)\"",       # sourceid: "valor" (case insensitive)
+                            r"sourceid\s*:\s*'([^']+)'",          # sourceid: 'valor' (case insensitive)
+                            r"sourceid\s*:\s*(\d+)",             # sourceid: números
+                            r"sourceid\s*:\s*([a-zA-Z0-9_-]+)",  # sourceid: alfanumérico
+                            r"sourceid\s*:\s*([^\s\n,]+)",       # sourceid: cualquier valor
+                            
+                            # Con underscores
+                            r"source_id\s*:\s*\"([^\"]+)\"",      # source_id: "valor"
+                            r"source_id\s*:\s*'([^']+)'",        # source_id: 'valor'
+                            r"source_id\s*:\s*(\d+)",            # source_id: números
+                            r"source_id\s*:\s*([a-zA-Z0-9_-]+)", # source_id: alfanumérico
+                            r"source_id\s*:\s*([^\s\n,]+)"       # source_id: cualquier valor
                         ]
                         
                         source_id_found = None
+                        matched_pattern = None
+                        
                         for pattern in patterns:
                             match = re.search(pattern, body, re.IGNORECASE)
                             if match:
-                                source_id_found = match.group(1)
-                                logger.info(f"🎯 SOURCE ID encontrado con patrón '{pattern}': {source_id_found}")
+                                source_id_found = match.group(1).strip()
+                                matched_pattern = pattern
+                                logger.info(f"🎯 SOURCE ID encontrado con patrón '{pattern}': '{source_id_found}'")
                                 break
                         
-                        # Si encontramos un sourceId, lo agregamos y detenemos la búsqueda
-                        if source_id_found:
-                            source_ids_found.append(source_id_found)
-                            all_source_ids.add(source_id_found)
-                            logger.info(f"✅ SourceId encontrado en mensaje inbound: {source_id_found}")
+                        # Validar que el sourceId encontrado no esté vacío
+                        if source_id_found and len(source_id_found.strip()) > 0:
+                            # Limpiar el valor (remover espacios extra, etc.)
+                            cleaned_source_id = source_id_found.strip()
+                            
+                            source_ids_found.append(cleaned_source_id)
+                            all_source_ids.add(cleaned_source_id)
+                            logger.info(f"✅ SourceId válido encontrado en mensaje inbound: '{cleaned_source_id}' (patrón: {matched_pattern})")
                             break
+                        elif source_id_found:
+                            logger.warning(f"⚠️ SourceId encontrado pero está vacío o solo espacios: '{source_id_found}'")
                     
                     # Si no encontramos sourceId en inbound, buscar también en outbound como respaldo
                     if not source_ids_found:
@@ -255,27 +277,49 @@ async def receive_webhook(request: Request):
                             logger.info(f"🔍 Analizando mensaje outbound: {msg.get('id', 'sin-id')} - Body: {body[:100]}...")
                             
                             patterns = [
-                                r"sourceId\s*:\s*(\d+)",             # sourceId: números
-                                r"sourceid\s*:\s*(\d+)",            # sourceid: números
-                                r"source_id\s*:\s*(\d+)",           # source_id: números
-                                r"sourceId\s*:\s*([a-zA-Z0-9_-]+)", # sourceId: alfanumérico
-                                r"sourceid\s*:\s*([a-zA-Z0-9_-]+)", # sourceid: alfanumérico
-                                r"source_id\s*:\s*([a-zA-Z0-9_-]+)" # source_id: alfanumérico
+                                # Patrones más específicos primero
+                                r"sourceId\s*:\s*\"([^\"]+)\"",        # sourceId: "valor"
+                                r"sourceId\s*:\s*'([^']+)'",          # sourceId: 'valor'
+                                r"sourceId\s*:\s*(\d+)",              # sourceId: números
+                                r"sourceId\s*:\s*([a-zA-Z0-9_-]+)",   # sourceId: alfanumérico
+                                r"sourceId\s*:\s*([^\s\n,]+)",        # sourceId: cualquier valor
+                                
+                                # Variaciones case insensitive
+                                r"sourceid\s*:\s*\"([^\"]+)\"",       # sourceid: "valor"
+                                r"sourceid\s*:\s*'([^']+)'",          # sourceid: 'valor'
+                                r"sourceid\s*:\s*(\d+)",             # sourceid: números
+                                r"sourceid\s*:\s*([a-zA-Z0-9_-]+)",  # sourceid: alfanumérico
+                                r"sourceid\s*:\s*([^\s\n,]+)",       # sourceid: cualquier valor
+                                
+                                # Con underscores
+                                r"source_id\s*:\s*\"([^\"]+)\"",      # source_id: "valor"
+                                r"source_id\s*:\s*'([^']+)'",        # source_id: 'valor'
+                                r"source_id\s*:\s*(\d+)",            # source_id: números
+                                r"source_id\s*:\s*([a-zA-Z0-9_-]+)", # source_id: alfanumérico
+                                r"source_id\s*:\s*([^\s\n,]+)"       # source_id: cualquier valor
                             ]
                             
                             source_id_found = None
+                            matched_pattern = None
+                            
                             for pattern in patterns:
                                 match = re.search(pattern, body, re.IGNORECASE)
                                 if match:
-                                    source_id_found = match.group(1)
-                                    logger.info(f"🎯 SOURCE ID encontrado en outbound con patrón '{pattern}': {source_id_found}")
+                                    source_id_found = match.group(1).strip()
+                                    matched_pattern = pattern
+                                    logger.info(f"🎯 SOURCE ID encontrado en outbound con patrón '{pattern}': '{source_id_found}'")
                                     break
                             
-                            if source_id_found:
-                                source_ids_found.append(source_id_found)
-                                all_source_ids.add(source_id_found)
-                                logger.info(f"✅ SourceId encontrado en mensaje outbound: {source_id_found}")
+                            # Validar que el sourceId encontrado no esté vacío
+                            if source_id_found and len(source_id_found.strip()) > 0:
+                                cleaned_source_id = source_id_found.strip()
+                                
+                                source_ids_found.append(cleaned_source_id)
+                                all_source_ids.add(cleaned_source_id)
+                                logger.info(f"✅ SourceId válido encontrado en mensaje outbound: '{cleaned_source_id}' (patrón: {matched_pattern})")
                                 break
+                            elif source_id_found:
+                                logger.warning(f"⚠️ SourceId encontrado en outbound pero está vacío: '{source_id_found}'")
                 else:
                     logger.warning(f"⚠️ No se pudo extraer lista de mensajes de la respuesta")
 
