@@ -104,14 +104,14 @@ async def receive_webhook(request: Request):
 
                 for msg in messages_data["messages"]:
                     if found_first_source_id:
-                        break  # ya encontramos el primero, no seguimos revisando
+                        break # ya encontramos el primero, no seguimos revisando
 
                     # Caso: mensaje es un diccionario
                     if isinstance(msg, dict):
                         if msg.get("direction") == "inbound":
                             inbound_messages.append(msg)
                             body = msg.get("body", "")
-                            match = re.search(r"sourceId:\s*(\S+)", body)
+                            match = re.search(r"sourceid\s*:\s*(\S+)", body, re.IGNORECASE)
                             if match:
                                 sid = match.group(1)
                                 source_ids_found.append(sid)
@@ -121,7 +121,7 @@ async def receive_webhook(request: Request):
                     # Caso: mensaje es texto plano
                     elif isinstance(msg, str):
                         inbound_messages.append({"raw": msg})
-                        match = re.search(r"sourceId:\s*(\S+)", msg)
+                        match = re.search(r"sourceid\s*:\s*(\S+)", msg, re.IGNORECASE)
                         if match:
                             sid = match.group(1)
                             source_ids_found.append(sid)
