@@ -371,7 +371,8 @@ async def receive_webhook(request: Request):
                 }
                 
                 payload = json.dumps({
-                    "sourceId": source_id_to_send
+                    "sourceId": source_id_to_send,
+                    "contactId": contact_id
                 })
                 
                 logger.info(f"📤 Enviando sourceId al webhook externo: {source_id_to_send}")
