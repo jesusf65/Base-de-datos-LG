@@ -40,10 +40,12 @@ async def receive_webhook(request: Request):
         if all_source_ids:
             webhook_sender.send_source_id_to_webhook(list(all_source_ids)[0], contact_id)
 
+        first_source_id = list(all_source_ids)[0] if all_source_ids else None
+        
         return {
             "status": "success",
             "contact_id": contact_id,
-            "source_id": source_id,
+            "source_id_found": first_source_id,      
             "source_ids_contact": list(all_source_ids),
             "conversations": enriched_conversations
         }
