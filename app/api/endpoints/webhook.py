@@ -26,6 +26,7 @@ async def receive_webhook(request: Request):
             messages_list = message_parser.extract_messages_from_response(messages_data)
             inbound, outbound, all_msgs = message_parser.classify_messages(messages_list)
 
+            # Buscar el source_id en inbound primero, luego outbound
             source_id = message_parser.find_source_id(inbound) or message_parser.find_source_id(outbound)
             if source_id:
                 all_source_ids.add(source_id)
@@ -37,11 +38,13 @@ async def receive_webhook(request: Request):
                 "total_messages": len(all_msgs)
             })
 
-        if all_source_ids:
-            webhook_sender.send_source_id_to_webhook(list(all_source_ids)[0], contact_id)
-
+        # Tomamos el primer source_id válido
         first_source_id = list(all_source_ids)[0] if all_source_ids else None
-        
+
+        # Enviar al webhook solo si hay un source_id encontrado
+        if first_source_id:
+            webhook_sender.send_source_id_to_webhook(first_source_id, contact_id)
+
         return {
             "status": "success",
             "contact_id": contact_id,
