@@ -110,10 +110,18 @@ async def receive_webhook(request: Request):
                 logger.info(f"📨 Mensajes reordenados del más antiguo al más reciente")
 
                 # Separar mensajes en listas diferentes
-                for message in reversed_messages:
+                for i, message in enumerate(reversed_messages):
+                    logger.info(f"🔍 DEBUG - Mensaje {i+1}: Tipo={type(message)}")
+                    
                     if isinstance(message, dict):
+                        # Log de la estructura completa del mensaje para debug
+                        logger.info(f"🔍 DEBUG - Keys del mensaje: {list(message.keys())}")
+                        
                         body = message.get("body", "")
                         direction = message.get("direction", "")
+                        msg_id = message.get("id", "sin-id")
+                        
+                        logger.info(f"🔍 DEBUG - ID: {msg_id}, Direction: '{direction}', Body: {body[:50]}...")
                         
                         # Agregar a la lista general
                         all_messages.append(message)
@@ -121,8 +129,15 @@ async def receive_webhook(request: Request):
                         # Separar por inbound y outbound
                         if direction == "inbound":
                             inbound_messages.append(message)
+                            logger.info(f"✅ Mensaje clasificado como INBOUND")
                         elif direction == "outbound":
                             outbound_messages.append(message)
+                            logger.info(f"✅ Mensaje clasificado como OUTBOUND")
+                        else:
+                            logger.warning(f"⚠️ Mensaje con direction desconocida: '{direction}'")
+                    else:
+                        logger.warning(f"⚠️ Mensaje no es diccionario: {type(message)}")
+                        logger.info(f"🔍 DEBUG - Contenido del mensaje: {str(message)[:100]}...")
 
                 logger.info(f"📊 Mensajes separados - Inbound: {len(inbound_messages)}, Outbound: {len(outbound_messages)}")
 
@@ -161,9 +176,13 @@ async def receive_webhook(request: Request):
                 "last_message_date": conversation.get("lastMessageDate"),
                 "contact_name": conversation.get("contactName"),
                 "phone": conversation.get("phone"),
-                "messages": inbound_messages,
+                "inbound_messages": inbound_messages,
+                "outbound_messages": outbound_messages,
+                "all_messages": all_messages,
                 "source_ids": final_source_ids,
-                "total_inbound_messages": len(inbound_messages)
+                "total_inbound_messages": len(inbound_messages),
+                "total_outbound_messages": len(outbound_messages),
+                "total_messages": len(all_messages)
             })
 
         response_data = {
