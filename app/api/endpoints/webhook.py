@@ -43,6 +43,7 @@ async def receive_webhook(request: Request):
         return {
             "status": "success",
             "contact_id": contact_id,
+            "source_id": source_id,
             "source_ids_contact": list(all_source_ids),
             "conversations": enriched_conversations
         }
