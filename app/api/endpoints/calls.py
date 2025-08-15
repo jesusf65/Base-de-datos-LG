@@ -38,13 +38,15 @@ async def get_conversation_messages(conversation_id: str, limit: int = 10):
             return None
 
         # DEBUG: Loggear la respuesta RAW completa
-        logger.info(f"🔍 DEBUG - Respuesta RAW completa: {response_data}")
+        logger.info(f"🔍 DEBUG - Respuesta RAW completa (primeros 2000 chars): {response_data[:2000]}")
         
         # Parsear la respuesta JSON
         parsed_data = json.loads(response_data)
         
         # DEBUG: Loggear la estructura parseada
-        logger.info(f"🔍 DEBUG - Respuesta parseada: {json.dumps(parsed_data, indent=2, ensure_ascii=False)}")
+        logger.info(f"🔍 DEBUG - Respuesta parseada (estructura): {json.dumps(parsed_data, indent=2, ensure_ascii=False)[:3000]}")
+        logger.info(f"🔍 DEBUG - Tipo de parsed_data: {type(parsed_data)}")
+        logger.info(f"🔍 DEBUG - Keys en parsed_data: {list(parsed_data.keys()) if isinstance(parsed_data, dict) else 'No es dict'}")
         
         return parsed_data
 
@@ -113,6 +115,7 @@ async def receive_webhook(request: Request):
             if messages_data:
                 logger.info(f"📨 Estructura de messages_data: {type(messages_data)}")
                 logger.info(f"📨 Keys disponibles: {list(messages_data.keys()) if isinstance(messages_data, dict) else 'No es dict'}")
+                logger.info(f"📨 Contenido completo de messages_data: {json.dumps(messages_data, indent=2, ensure_ascii=False)[:2000]}")
                 
                 # Manejar diferentes estructuras de respuesta
                 messages_list = None
@@ -121,15 +124,31 @@ async def receive_webhook(request: Request):
                     # Buscar en diferentes posibles keys
                     if "messages" in messages_data:
                         messages_list = messages_data["messages"]
+                        logger.info(f"📨 Usando 'messages' key, tipo: {type(messages_list)}, longitud: {len(messages_list) if isinstance(messages_list, list) else 'no es lista'}")
                     elif "data" in messages_data:
                         messages_list = messages_data["data"]
+                        logger.info(f"📨 Usando 'data' key, tipo: {type(messages_list)}")
                     elif "conversations" in messages_data:
                         messages_list = messages_data["conversations"]
+                        logger.info(f"📨 Usando 'conversations' key, tipo: {type(messages_list)}")
                     else:
-                        # Si no encontramos una key conocida, usar todo el dict
-                        messages_list = [messages_data]
+                        # Listar todas las keys disponibles para debugging
+                        available_keys = list(messages_data.keys())
+                        logger.info(f"📨 Keys disponibles en messages_data: {available_keys}")
+                        
+                        # Intentar con keys que contengan 'message' en su nombre
+                        message_keys = [k for k in available_keys if 'message' in k.lower()]
+                        if message_keys:
+                            key_to_use = message_keys[0]
+                            messages_list = messages_data[key_to_use]
+                            logger.info(f"📨 Usando key '{key_to_use}' que contiene 'message', tipo: {type(messages_list)}")
+                        else:
+                            # Si no encontramos una key conocida, crear una lista con todo el dict
+                            messages_list = [messages_data]
+                            logger.info(f"📨 No se encontró key de mensajes, usando todo el dict como mensaje único")
                 elif isinstance(messages_data, list):
                     messages_list = messages_data
+                    logger.info(f"📨 messages_data es lista directamente, longitud: {len(messages_list)}")
 
                 if messages_list and isinstance(messages_list, list):
                     logger.info(f"📨 Total de mensajes recibidos: {len(messages_list)}")
