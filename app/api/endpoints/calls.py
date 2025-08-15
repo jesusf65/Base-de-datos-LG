@@ -14,7 +14,7 @@ async def get_inbound_messages(conversation_id: str):
     """Obtiene SOLO mensajes inbound de una conversación"""
     try:
         conn = http.client.HTTPSConnection(LEADCONNECTOR_HOST)
-        endpoint = f"/conversations/{conversation_id}/messages?limit=50"
+        endpoint = f"/conversations/{conversation_id}/messages?limit=4"
         headers = {
             'Accept': 'application/json',
             'Version': LEADCONNECTOR_VERSION,
