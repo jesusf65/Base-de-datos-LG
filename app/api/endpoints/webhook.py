@@ -41,15 +41,17 @@ async def receive_webhook(request: Request):
         # Tomamos el primer source_id válido
         first_source_id = list(all_source_ids)[0] if all_source_ids else None
 
-        # Enviar al webhook solo si hay un source_id encontrado
+        # Enviar al webhook solo si hay un source_id encontrado y capturar la respuesta
+        webhook_response = None
         if first_source_id:
-            webhook_sender.send_source_id_to_webhook(first_source_id, contact_id)
+            webhook_response = webhook_sender.send_source_id_to_webhook(first_source_id, contact_id)
 
         return {
             "status": "success",
             "contact_id": contact_id,
-            "source_id_found": first_source_id,      
+            "source_id_found": first_source_id,
             "source_ids_contact": list(all_source_ids),
+            "webhook_response": webhook_response,  # <-- Aquí incluimos la respuesta del webhook
             "conversations": enriched_conversations
         }
 

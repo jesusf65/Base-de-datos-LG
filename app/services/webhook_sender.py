@@ -23,7 +23,10 @@ def send_source_id_to_webhook(source_id, contact_id):
     conn.request("POST", target_endpoint, body=payload, headers=headers)
     response = conn.getresponse()
     data = response.read().decode("utf-8")
+
     if response.status >= 400:
         logger.error(f"❌ Error enviando al webhook: {response.status} - {data}")
+        return {"status": "error", "http_status": response.status, "response": data}
     else:
         logger.info(f"✅ Webhook enviado: {data}")
+        return {"status": "success", "response": json.loads(data)}
