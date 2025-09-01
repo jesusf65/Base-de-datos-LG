@@ -15,7 +15,7 @@ def get_conversations_by_contact(contact_id: str):
     endpoint = f"/conversations/search?contactId={contact_id}"
     return _make_request("GET", endpoint)
 
-def get_conversation_messages(conversation_id: str, limit: int = 10):
+def get_conversation_messages(conversation_id: str, limit: int = 20):
     endpoint = f"/conversations/{conversation_id}/messages?limit={limit}"
     return _make_request("GET", endpoint)
 

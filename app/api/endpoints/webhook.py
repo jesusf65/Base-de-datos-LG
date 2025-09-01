@@ -62,23 +62,23 @@ async def receive_webhook(request: Request):
 @router.post("/webhook_premiumcars")
 async def receive_webhook(request: Request):
     try:
-        data = await request.json()
-        contact_id = data.get("contact_id")
+        datas = await request.json()
+        contact_id = datas.get("contact_id")
         if not contact_id:
             raise HTTPException(status_code=400, detail="El campo contact_id es requerido")
 
-        conversations = leadconnector.get_conversations_by_contact_premium_cars(contact_id)
-        if not conversations or not conversations.get("conversations"):
+        conversations_premium = leadconnector.get_conversations_by_contact_premium_cars(contact_id)
+        if not conversations_premium or not conversations_premium.get("conversations"):
             return {"status": "success", "message": "No se encontraron conversaciones"}
 
         all_source_ids = set()
         enriched_conversations = []
 
-        for conv in conversations["conversations"]:
+        for conv in conversations_premium["conversations"]:
             conv_id = conv["id"]
-            messages_data = leadconnector.get_conversation_messages_premium_cars(conv_id)
-            messages_list = message_parser.extract_messages_from_response(messages_data)
-            inbound, outbound, all_msgs = message_parser.classify_messages(messages_list)
+            messages_data_premium = leadconnector.get_conversation_messages_premium_cars(conv_id)
+            messages_list_premium = message_parser.extract_messages_from_response(messages_data_premium)
+            inbound, outbound, all_msgs = message_parser.classify_messages(messages_list_premium)
 
             # Buscar el source_id en inbound primero, luego outbound
             source_id = message_parser.find_source_id(inbound) or message_parser.find_source_id(outbound)
