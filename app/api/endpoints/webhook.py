@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException
-from app.services import leadconnector, message_parser, webhook_sender
+from app.services import base, message_parser, webhook_sender
 from app.utils.logger import setup_logger
 
 router = APIRouter()
@@ -13,7 +13,7 @@ async def receive_webhook(request: Request):
         if not contact_id:
             raise HTTPException(status_code=400, detail="El campo contact_id es requerido")
 
-        conversations = leadconnector.get_conversations_by_contact(contact_id)
+        conversations = base.get_conversations_by_contact(contact_id)
         if not conversations or not conversations.get("conversations"):
             return {"status": "success", "message": "No se encontraron conversaciones"}
 
@@ -22,7 +22,7 @@ async def receive_webhook(request: Request):
 
         for conv in conversations["conversations"]:
             conv_id = conv["id"]
-            messages_data = leadconnector.get_conversation_messages(conv_id)
+            messages_data = base.get_conversation_messages(conv_id)
             messages_list = message_parser.extract_messages_from_response(messages_data)
             inbound, outbound, all_msgs = message_parser.classify_messages(messages_list)
 
@@ -67,7 +67,7 @@ async def receive_webhook(request: Request):
         if not contact_id:
             raise HTTPException(status_code=400, detail="El campo contact_id es requerido")
 
-        conversations_premium = leadconnector.get_conversations_by_contact_premium_cars(contact_id)
+        conversations_premium = base.get_conversations_by_contact_premium_cars(contact_id)
         if not conversations_premium or not conversations_premium.get("conversations"):
             return {"status": "success", "message": "No se encontraron conversaciones"}
 
@@ -76,7 +76,7 @@ async def receive_webhook(request: Request):
 
         for conv in conversations_premium["conversations"]:
             conv_id = conv["id"]
-            messages_data_premium = leadconnector.get_conversation_messages_premium_cars(conv_id)
+            messages_data_premium = base.get_conversation_messages_premium_cars(conv_id)
             messages_list_premium = message_parser.extract_messages_from_response(messages_data_premium)
             inbound, outbound, all_msgs = message_parser.classify_messages(messages_list_premium)
 
