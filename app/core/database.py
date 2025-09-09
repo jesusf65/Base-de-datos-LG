@@ -9,7 +9,7 @@ settings = get_settings()
 engine = create_engine(settings.DATABASE_URL,
                        pool_pre_ping=True,
                        pool_recycle=3600,
-                       pool_size=20,
+                       pool_size=3,
                        max_overflow=0)
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
