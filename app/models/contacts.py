@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON
-from app.models.base import Base
+from app.models.BaseModel import Base
 
 class ContactoDriverUS(Base):
     __tablename__ = "contactos_driver_us"
