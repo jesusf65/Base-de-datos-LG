@@ -18,7 +18,10 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = os.environ.get("PGDATABASE")  
     
     DATABASE_URL: str = os.environ.get("DATABASE_URL")
-    DATABASE_URI: str = os.environ.get("DATABASE_URL")
+    DATABASE_URI: str = (
+        f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@"
+        f"{POSTGRES_SERVER}:{POSTGRES_PORT}/{POSTGRES_DB}"
+    )
 
 @lru_cache()
 def get_settings() -> Settings:
