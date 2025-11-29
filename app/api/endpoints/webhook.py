@@ -4,9 +4,7 @@ from typing import Dict, Any, Optional, List
 import logging
 import json
 from datetime import datetime, timedelta
-import httpx
-import uuid
-from collections import defaultdict
+import re
 import statistics
 
 # Configuración de logging
@@ -15,371 +13,369 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('response_times.log', encoding='utf-8')
+        logging.FileHandler('form_response_times.log', encoding='utf-8')
     ]
 )
-logger = logging.getLogger("response_times_tracker")
+logger = logging.getLogger("form_response_tracker")
 
 router = APIRouter()
 
-# Almacenamiento para tracking de tiempos
-conversation_tracker = {
-    "conversations": {},  # conversation_id -> {messages: [], timestamps: []}
-    "response_times": [],  # Lista de tiempos de respuesta en segundos
-    "contact_conversations": defaultdict(list),  # contact_id -> [conversation_ids]
+# Almacenamiento para métricas de formularios
+form_metrics_store = {
+    "submissions": [],
+    "contact_metrics": {},
+    "response_time_stats": []
 }
 
 async def get_raw_body(request: Request):
     return await request.body()
 
-def calculate_response_time(conversation_messages: List[dict]) -> List[float]:
+def extract_time_from_string(time_string: str) -> float:
     """
-    Calcula los tiempos de respuesta entre mensajes inbound y outbound
+    Convierte strings de tiempo como "1 hora con 34 minutos" a minutos
     """
-    response_times = []
+    if not time_string or not isinstance(time_string, str):
+        return None
     
-    for i in range(1, len(conversation_messages)):
-        prev_msg = conversation_messages[i-1]
-        current_msg = conversation_messages[i]
+    time_string = time_string.lower()
+    
+    try:
+        # Patrón para "X hora(s) con Y minuto(s)"
+        pattern1 = r'(\d+)\s*hora(?:\w*)\s*con\s*(\d+)\s*minuto'
+        match1 = re.search(pattern1, time_string)
+        if match1:
+            horas = int(match1.group(1))
+            minutos = int(match1.group(2))
+            return horas * 60 + minutos
         
-        # Solo calcular si hay cambio de dirección (inbound -> outbound o viceversa)
-        if prev_msg['direction'] != current_msg['direction']:
+        # Patrón para "X hora(s) Y minuto(s)"  
+        pattern2 = r'(\d+)\s*hora(?:\w*)\s*(\d+)\s*minuto'
+        match2 = re.search(pattern2, time_string)
+        if match2:
+            horas = int(match2.group(1))
+            minutos = int(match2.group(2))
+            return horas * 60 + minutos
+        
+        # Patrón para solo horas
+        pattern3 = r'(\d+)\s*hora'
+        match3 = re.search(pattern3, time_string)
+        if match3:
+            return int(match3.group(1)) * 60
+        
+        # Patrón para solo minutos
+        pattern4 = r'(\d+)\s*minuto'
+        match4 = re.search(pattern4, time_string)
+        if match4:
+            return int(match4.group(1))
+        
+        # Intentar convertir directamente si es número
+        if time_string.replace('.', '').isdigit():
+            return float(time_string)
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Could not parse time string: {time_string} - Error: {e}")
+    
+    return None
+
+def extract_form_metrics(form_data: dict) -> Dict[str, Any]:
+    """
+    Extrae métricas clave del formulario de 110 campos
+    """
+    contact_id = form_data.get('contactId') or form_data.get('contact_id')
+    contact_phone = form_data.get('contactPhone') or form_data.get('contactPhone')
+    contact_name = form_data.get('contactName') or form_data.get('contactName') or 'Unknown'
+    
+    # Extraer tiempo de respuesta
+    response_time_str = None
+    response_time_minutes = None
+    
+    # Buscar en diferentes campos posibles de tiempo
+    time_fields = [
+        'Tiempo hasta primer mensaje enviado',
+        'Tiempo de respuesta',
+        'Response Time',
+        'Wait Time',
+        'Hora respuesta del vendedor'
+    ]
+    
+    for field in time_fields:
+        if field in form_data and form_data[field]:
+            response_time_str = form_data[field]
+            response_time_minutes = extract_time_from_string(response_time_str)
+            if response_time_minutes is not None:
+                break
+    
+    # Extraer cantidad de mensajes
+    messages_sent = None
+    message_fields = [
+        'mensajes salientes',
+        'mensajes_enviados',
+        'messages_sent',
+        'outbound_messages'
+    ]
+    
+    for field in message_fields:
+        if field in form_data and form_data[field]:
             try:
-                prev_time = datetime.fromisoformat(prev_msg['timestamp'].replace('Z', '+00:00'))
-                current_time = datetime.fromisoformat(current_msg['timestamp'].replace('Z', '+00:00'))
-                
-                time_diff = (current_time - prev_time).total_seconds()
-                
-                # Solo considerar respuestas válidas (menos de 24 horas)
-                if 0 < time_diff < 86400:  # 24 horas en segundos
-                    response_times.append(time_diff)
-                    logger.info(f"⏱️ Response time calculated: {time_diff:.2f} seconds")
-                    
-            except Exception as e:
-                logger.warning(f"⚠️ Could not calculate response time: {e}")
+                messages_sent = int(form_data[field])
+                break
+            except:
+                pass
     
-    return response_times
+    # Timestamps importantes
+    first_message_time = form_data.get('Hora de primer mensaje') or form_data.get('Primer mensaje registrado')
+    response_timestamp = form_data.get('Timestamp Respuesta') or form_data.get('Hora respuesta del vendedor')
+    
+    # Fuente del lead
+    lead_source = form_data.get('Fuente del lead') or form_data.get('Canal') or 'unknown'
+    
+    return {
+        "contact_id": contact_id,
+        "contact_name": contact_name,
+        "contact_phone": contact_phone,
+        "response_time_string": response_time_str,
+        "response_time_minutes": response_time_minutes,
+        "messages_sent": messages_sent,
+        "first_message_time": first_message_time,
+        "response_timestamp": response_timestamp,
+        "lead_source": lead_source,
+        "submission_timestamp": datetime.now().isoformat(),
+        "total_form_fields": len(form_data),
+        "fields_with_data": sum(1 for v in form_data.values() if v and str(v).strip())
+    }
 
-def update_conversation_tracker(message_info: dict):
+def calculate_form_response_stats():
     """
-    Actualiza el tracker de conversaciones y calcula tiempos de respuesta
+    Calcula estadísticas basadas en los formularios recibidos
     """
-    contact_id = message_info['contact_id']
-    conversation_id = message_info['conversation_id'] or contact_id  # Fallback to contact_id
-    message_timestamp = message_info['timestamp']
+    submissions = form_metrics_store["submissions"]
     
-    # Inicializar conversación si no existe
-    if conversation_id not in conversation_tracker["conversations"]:
-        conversation_tracker["conversations"][conversation_id] = {
-            "contact_id": contact_id,
-            "contact_name": message_info['contact_name'],
-            "contact_phone": message_info['contact_phone'],
-            "messages": [],
-            "timestamps": [],
-            "start_time": message_timestamp
-        }
-    
-    # Agregar mensaje a la conversación
-    conversation = conversation_tracker["conversations"][conversation_id]
-    conversation["messages"].append(message_info)
-    conversation["timestamps"].append(message_timestamp)
-    
-    # Actualizar último mensaje
-    conversation["last_message"] = message_timestamp
-    conversation["message_count"] = len(conversation["messages"])
-    
-    # Calcular tiempos de respuesta si hay al menos 2 mensajes
-    if len(conversation["messages"]) >= 2:
-        new_response_times = calculate_response_time(conversation["messages"])
-        
-        # Agregar nuevos tiempos al tracker global
-        conversation_tracker["response_times"].extend(new_response_times)
-        
-        # Actualizar estadísticas de esta conversación
-        if new_response_times:
-            conversation["last_response_time"] = new_response_times[-1]
-            conversation["response_times"] = conversation.get("response_times", []) + new_response_times
-    
-    # Mantener contacto-conversation mapping
-    if conversation_id not in conversation_tracker["contact_conversations"][contact_id]:
-        conversation_tracker["contact_conversations"][contact_id].append(conversation_id)
-    
-    # Limpiar conversaciones antiguas (más de 30 días)
-    cleanup_old_conversations()
-
-def cleanup_old_conversations(days=30):
-    """
-    Limpia conversaciones más antiguas que 'days' días
-    """
-    cutoff_time = datetime.now() - timedelta(days=days)
-    conversations_to_remove = []
-    
-    for conv_id, conversation in conversation_tracker["conversations"].items():
-        try:
-            last_msg_time = datetime.fromisoformat(conversation["last_message"].replace('Z', '+00:00'))
-            if last_msg_time < cutoff_time:
-                conversations_to_remove.append(conv_id)
-        except:
-            pass
-    
-    for conv_id in conversations_to_remove:
-        del conversation_tracker["conversations"][conv_id]
-    
-    if conversations_to_remove:
-        logger.info(f"🧹 Cleaned up {len(conversations_to_remove)} old conversations")
-
-def get_response_time_stats() -> Dict[str, Any]:
-    """
-    Calcula estadísticas de tiempos de respuesta
-    """
-    response_times = conversation_tracker["response_times"]
-    
-    if not response_times:
+    if not submissions:
         return {
-            "total_conversations": len(conversation_tracker["conversations"]),
-            "total_messages": sum(len(conv["messages"]) for conv in conversation_tracker["conversations"].values()),
-            "message": "No response times calculated yet"
+            "total_submissions": 0,
+            "message": "No form submissions yet"
         }
     
-    # Convertir a minutos para estadísticas más legibles
-    response_times_minutes = [rt / 60 for rt in response_times]
+    # Filtrar submissions con tiempos de respuesta válidos
+    valid_response_times = [s for s in submissions if s['response_time_minutes'] is not None]
+    response_times_minutes = [s['response_time_minutes'] for s in valid_response_times]
     
     stats = {
-        "total_response_times": len(response_times),
-        "average_response_minutes": round(statistics.mean(response_times_minutes), 2),
-        "median_response_minutes": round(statistics.median(response_times_minutes), 2),
-        "min_response_minutes": round(min(response_times_minutes), 2),
-        "max_response_minutes": round(max(response_times_minutes), 2),
-        "std_dev_minutes": round(statistics.stdev(response_times_minutes) if len(response_times) > 1 else 0, 2),
-        "total_conversations": len(conversation_tracker["conversations"]),
-        "total_messages": sum(len(conv["messages"]) for conv in conversation_tracker["conversations"].values()),
-        "active_conversations_today": count_active_conversations_today()
+        "total_submissions": len(submissions),
+        "submissions_with_response_times": len(valid_response_times),
+        "coverage_rate": f"{(len(valid_response_times) / len(submissions) * 100):.1f}%" if submissions else "0%"
     }
     
-    # Percentiles
-    if len(response_times) >= 5:
-        sorted_times = sorted(response_times_minutes)
+    if response_times_minutes:
         stats.update({
-            "percentile_25_minutes": round(sorted_times[int(len(sorted_times) * 0.25)], 2),
-            "percentile_75_minutes": round(sorted_times[int(len(sorted_times) * 0.75)], 2),
-            "percentile_90_minutes": round(sorted_times[int(len(sorted_times) * 0.90)], 2)
+            "average_response_minutes": round(statistics.mean(response_times_minutes), 2),
+            "median_response_minutes": round(statistics.median(response_times_minutes), 2),
+            "min_response_minutes": round(min(response_times_minutes), 2),
+            "max_response_minutes": round(max(response_times_minutes), 2),
+            "response_time_range": f"{min(response_times_minutes)} - {max(response_times_minutes)} minutes"
         })
+        
+        # Análisis de desempeño
+        avg_time = stats['average_response_minutes']
+        if avg_time < 5:
+            stats["performance"] = "Excellent"
+            stats["recommendation"] = "Outstanding response times!"
+        elif avg_time < 15:
+            stats["performance"] = "Good" 
+            stats["recommendation"] = "Good response times. Aim for under 5 minutes."
+        elif avg_time < 60:
+            stats["performance"] = "Needs Improvement"
+            stats["recommendation"] = "Focus on reducing response times to under 15 minutes."
+        else:
+            stats["performance"] = "Poor"
+            stats["recommendation"] = "Immediate action required to improve response times."
+    
+    # Estadísticas de mensajes
+    valid_message_counts = [s for s in submissions if s['messages_sent'] is not None]
+    if valid_message_counts:
+        message_counts = [s['messages_sent'] for s in valid_message_counts]
+        stats["message_stats"] = {
+            "average_messages_per_contact": round(statistics.mean(message_counts), 2),
+            "total_messages_tracked": sum(message_counts),
+            "contacts_with_message_data": len(valid_message_counts)
+        }
     
     return stats
 
-def count_active_conversations_today() -> int:
-    """
-    Cuenta conversaciones activas hoy
-    """
-    today = datetime.now().date()
-    count = 0
-    
-    for conversation in conversation_tracker["conversations"].values():
-        try:
-            last_msg_time = datetime.fromisoformat(conversation["last_message"].replace('Z', '+00:00'))
-            if last_msg_time.date() == today:
-                count += 1
-        except:
-            pass
-    
-    return count
-
-def extract_message_info(body: dict, direction: str) -> dict:
-    """
-    Extrae información del mensaje para tracking
-    """
-    message_id = body.get('messageId') or body.get('id') or str(uuid.uuid4())
-    contact_id = body.get('contactId') or body.get('contact_id') or 'unknown'
-    conversation_id = body.get('conversationId') or body.get('conversation_id') or contact_id
-    
-    message_content = body.get('body') or body.get('message') or body.get('text') or body.get('content') or ''
-    
-    channel = body.get('channel') or body.get('channelType') or 'unknown'
-    provider = body.get('provider') or body.get('platform') or 'unknown'
-    
-    contact_name = body.get('contactName') or body.get('from') or body.get('to') or 'Unknown'
-    contact_phone = body.get('contactPhone') or body.get('phone') or body.get('fromNumber') or body.get('toNumber')
-    
-    timestamp = body.get('timestamp') or body.get('time') or body.get('createdAt') or datetime.now().isoformat()
-    
-    return {
-        "message_id": message_id,
-        "direction": direction,
-        "contact_id": contact_id,
-        "conversation_id": conversation_id,
-        "content": message_content,
-        "channel": channel,
-        "provider": provider,
-        "contact_name": contact_name,
-        "contact_phone": contact_phone,
-        "timestamp": timestamp,
-        "processed_at": datetime.now().isoformat()
-    }
-
-@router.post("/webhook/messages")
-async def receive_all_messages(
+@router.post("/webhook/form-submission")
+async def receive_form_submission(
     request: Request,
     raw_body: bytes = Depends(get_raw_body)
 ):
     """
-    Endpoint universal para recibir mensajes y calcular tiempos de respuesta
+    Endpoint específico para formularios de 110 campos
     """
     try:
         client_host = request.client.host if request.client else "Unknown"
-        headers = dict(request.headers)
         
         raw_body_text = raw_body.decode('utf-8', errors='ignore')
         
         try:
-            body_content = json.loads(raw_body_text) if raw_body_text.strip() else {}
+            form_data = json.loads(raw_body_text) if raw_body_text.strip() else {}
         except json.JSONDecodeError:
-            body_content = {"raw_text": raw_body_text}
+            form_data = {"raw_text": raw_body_text}
         
-        # Detectar dirección
-        direction = "inbound" if body_content.get('direction') == 'inbound' else "outbound"
+        # Extraer métricas del formulario
+        metrics = extract_form_metrics(form_data)
         
-        # Extraer información
-        message_info = extract_message_info(body_content, direction)
+        # Log detallado
+        logger.info("📋 FORM SUBMISSION RECEIVED")
+        logger.info(f"👤 Contact: {metrics['contact_name']} | 📞 {metrics['contact_phone']}")
+        logger.info(f"🆔 Contact ID: {metrics['contact_id']}")
         
-        # Log del mensaje
-        logger.info(f"📨 {direction.upper()} | 👤 {message_info['contact_name']} | 📞 {message_info['contact_phone']}")
-        logger.info(f"💬 {message_info['content'][:100]}{'...' if len(message_info['content']) > 100 else ''}")
+        if metrics['response_time_string']:
+            logger.info(f"⏱️ Response Time: {metrics['response_time_string']} → {metrics['response_time_minutes']} minutes")
+        else:
+            logger.warning("⚠️ No response time data found in form")
         
-        # Actualizar tracker y calcular tiempos
-        update_conversation_tracker(message_info)
+        if metrics['messages_sent'] is not None:
+            logger.info(f"📤 Messages Sent: {metrics['messages_sent']}")
         
-        # Obtener estadísticas actualizadas
-        stats = get_response_time_stats()
+        logger.info(f"📊 Form Analysis: {metrics['fields_with_data']}/{metrics['total_form_fields']} fields with data")
+        
+        # Almacenar métricas
+        form_metrics_store["submissions"].append(metrics)
+        
+        # Actualizar por contacto
+        if metrics['contact_id'] and metrics['contact_id'] != 'unknown':
+            form_metrics_store["contact_metrics"][metrics['contact_id']] = metrics
+        
+        # Limpiar datos antiguos (más de 30 días)
+        cleanup_old_submissions()
+        
+        # Calcular estadísticas
+        stats = calculate_form_response_stats()
         
         response_data = {
             "status": "success",
-            "message": f"{direction} message processed",
-            "message_info": {
-                "message_id": message_info['message_id'],
-                "direction": direction,
-                "contact_id": message_info['contact_id'],
-                "conversation_id": message_info['conversation_id']
+            "message": "Form submission processed for response time tracking",
+            "metrics_extracted": {
+                "response_time_detected": metrics['response_time_minutes'] is not None,
+                "messages_detected": metrics['messages_sent'] is not None,
+                "contact_identified": metrics['contact_id'] != 'unknown'
             },
-            "response_time_stats": stats
+            "current_stats": stats
         }
         
         return JSONResponse(content=response_data, status_code=200)
         
     except Exception as e:
-        logger.error(f"❌ Error processing message: {str(e)}")
+        logger.error(f"❌ Error processing form submission: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
 
-@router.get("/webhook/response-times/stats")
-async def get_response_time_statistics():
+def cleanup_old_submissions(days=30):
     """
-    Obtiene estadísticas completas de tiempos de respuesta
+    Limpia submissions antiguos
     """
-    stats = get_response_time_stats()
+    cutoff_time = datetime.now() - timedelta(days=days)
+    submissions_to_keep = []
     
-    return {
-        "status": "success",
-        "timestamp": datetime.now().isoformat(),
-        "statistics": stats,
-        "interpretation": interpret_response_times(stats)
-    }
-
-def interpret_response_times(stats: Dict) -> Dict:
-    """
-    Proporciona interpretación de las estadísticas
-    """
-    avg_time = stats.get('average_response_minutes', 0)
+    for submission in form_metrics_store["submissions"]:
+        try:
+            submission_time = datetime.fromisoformat(submission['submission_timestamp'].replace('Z', '+00:00'))
+            if submission_time > cutoff_time:
+                submissions_to_keep.append(submission)
+        except:
+            submissions_to_keep.append(submission)
     
-    interpretation = {
-        "performance": "Excellent" if avg_time < 5 else "Good" if avg_time < 15 else "Needs Improvement" if avg_time < 60 else "Poor",
-        "sla_meeting": avg_time <= 15,  # SLA común de 15 minutos
-        "recommendation": ""
-    }
-    
-    if avg_time < 5:
-        interpretation["recommendation"] = "Excellent response times! Maintain this level."
-    elif avg_time < 15:
-        interpretation["recommendation"] = "Good response times. Consider optimizing for under 5 minutes."
-    elif avg_time < 60:
-        interpretation["recommendation"] = "Response times need improvement. Focus on reducing to under 15 minutes."
-    else:
-        interpretation["recommendation"] = "Critical: Response times too high. Immediate action required."
-    
-    return interpretation
-
-@router.get("/webhook/response-times/conversations")
-async def get_conversations(
-    contact_id: Optional[str] = None,
-    limit: int = 10
-):
-    """
-    Obtiene conversaciones específicas con sus tiempos de respuesta
-    """
-    conversations = conversation_tracker["conversations"]
-    
-    if contact_id:
-        # Filtrar por contact_id
-        conv_ids = conversation_tracker["contact_conversations"].get(contact_id, [])
-        filtered_conversations = {conv_id: conversations[conv_id] for conv_id in conv_ids if conv_id in conversations}
-    else:
-        # Últimas conversaciones
-        sorted_conv_ids = sorted(conversations.keys(), 
-                               key=lambda x: conversations[x]["last_message"], 
-                               reverse=True)[:limit]
-        filtered_conversations = {conv_id: conversations[conv_id] for conv_id in sorted_conv_ids}
-    
-    # Formatear respuesta
-    formatted_conversations = {}
-    for conv_id, conv_data in filtered_conversations.items():
-        formatted_conversations[conv_id] = {
-            "contact_info": {
-                "contact_id": conv_data["contact_id"],
-                "contact_name": conv_data["contact_name"],
-                "contact_phone": conv_data["contact_phone"]
-            },
-            "message_count": conv_data["message_count"],
-            "last_message": conv_data["last_message"],
-            "response_times_minutes": [round(rt/60, 2) for rt in conv_data.get("response_times", [])],
-            "average_response_minutes": round(statistics.mean([rt/60 for rt in conv_data.get("response_times", [])]), 2) if conv_data.get("response_times") else None
-        }
-    
-    return {
-        "status": "success",
-        "timestamp": datetime.now().isoformat(),
-        "total_conversations": len(formatted_conversations),
-        "conversations": formatted_conversations
-    }
+    if len(submissions_to_keep) < len(form_metrics_store["submissions"]):
+        removed = len(form_metrics_store["submissions"]) - len(submissions_to_keep)
+        form_metrics_store["submissions"] = submissions_to_keep
+        logger.info(f"🧹 Cleaned up {removed} old form submissions")
 
 @router.get("/webhook/response-times/dashboard")
-async def response_times_dashboard():
+async def form_response_dashboard():
     """
-    Dashboard completo de tiempos de respuesta
+    Dashboard de tiempos de respuesta basado en formularios
     """
-    stats = get_response_time_stats()
+    stats = calculate_form_response_stats()
+    
+    # Últimas 5 submissions
+    recent_submissions = form_metrics_store["submissions"][-5:] if form_metrics_store["submissions"] else []
     
     return {
-        "dashboard": "📊 Response Times Dashboard",
+        "dashboard": "📊 Form Response Times Dashboard",
         "timestamp": datetime.now().isoformat(),
-        "key_metrics": {
-            "average_response_time": f"{stats.get('average_response_minutes', 0)} minutes",
-            "median_response_time": f"{stats.get('median_response_minutes', 0)} minutes",
-            "sla_compliance": f"{(sum(1 for rt in conversation_tracker['response_times'] if rt <= 900) / len(conversation_tracker['response_times']) * 100) if conversation_tracker['response_times'] else 0:.1f}%" if conversation_tracker['response_times'] else "N/A",
-            "active_conversations_today": stats.get('active_conversations_today', 0)
+        "overview": {
+            "total_form_submissions": stats["total_submissions"],
+            "submissions_with_time_data": stats.get("submissions_with_response_times", 0),
+            "data_coverage_rate": stats.get("coverage_rate", "0%")
         },
-        "endpoints": {
-            "stats": "/webhook/response-times/stats",
-            "conversations": "/webhook/response-times/conversations",
-            "webhook": "POST /webhook/messages"
-        }
+        "response_time_metrics": {
+            "average_minutes": stats.get("average_response_minutes", "No data"),
+            "median_minutes": stats.get("median_response_minutes", "No data"),
+            "performance_rating": stats.get("performance", "No data"),
+            "recommendation": stats.get("recommendation", "Collect more data")
+        },
+        "recent_activity": {
+            "last_5_submissions": [
+                {
+                    "contact": sub["contact_name"],
+                    "phone": sub["contact_phone"],
+                    "response_time": sub["response_time_string"],
+                    "response_minutes": sub["response_time_minutes"],
+                    "messages_sent": sub["messages_sent"]
+                }
+                for sub in recent_submissions
+            ]
+        },
+        "message_metrics": stats.get("message_stats", {})
+    }
+
+@router.get("/webhook/response-times/raw-data")
+async def get_raw_form_data(limit: int = 20):
+    """
+    Obtiene los datos crudos de formularios para análisis
+    """
+    submissions = form_metrics_store["submissions"][-limit:] if form_metrics_store["submissions"] else []
+    
+    return {
+        "status": "success",
+        "timestamp": datetime.now().isoformat(),
+        "total_stored": len(form_metrics_store["submissions"]),
+        "requested_limit": limit,
+        "submissions": submissions
     }
 
 # Endpoint de compatibilidad
 @router.post("/webhook/inbound")
-async def backward_compatibility_inbound(
+async def backward_compatibility_form(
     request: Request,
     raw_body: bytes = Depends(get_raw_body)
 ):
     """
-    Endpoint de compatibilidad para /webhook/inbound
+    Endpoint de compatibilidad que procesa el formulario de 110 campos
     """
-    logger.warning("⚠️ Using deprecated endpoint /webhook/inbound")
-    return await receive_all_messages(request, raw_body)
+    return await receive_form_submission(request, raw_body)
+
+@router.get("/webhook/form-stats/help")
+async def form_stats_help():
+    """
+    Ayuda para entender el sistema de tracking de formularios
+    """
+    return {
+        "system": "Form Response Time Tracker",
+        "purpose": "Track response times from 110-field form submissions",
+        "key_metrics_extracted": [
+            "Tiempo hasta primer mensaje enviado → Response time in minutes",
+            "mensajes salientes → Outbound message count", 
+            "contactId → Contact identification",
+            "contactPhone → Contact phone number"
+        ],
+        "endpoints": {
+            "primary": "POST /webhook/form-submission",
+            "compatibility": "POST /webhook/inbound (legacy)",
+            "dashboard": "GET /webhook/response-times/dashboard",
+            "raw_data": "GET /webhook/response-times/raw-data"
+        },
+        "example_analysis": {
+            "input": "Tiempo hasta primer mensaje enviado: '1 hora con 34 minutos'",
+            "output": "94 minutes response time",
+            "performance": "Needs Improvement (target: <15 minutes)"
+        }
+    }
