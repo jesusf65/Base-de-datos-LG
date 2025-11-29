@@ -7,16 +7,16 @@ import json
 from datetime import datetime
 import httpx
 
-# Configuración de logging simplificada
+# Configuración de logging más detallada
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('webhook_inbound.log', encoding='utf-8')
+        logging.FileHandler('webhook_inbound_complete.log', encoding='utf-8')
     ]
 )
-logger = logging.getLogger("ghl_inbound_webhook")
+logger = logging.getLogger("ghl_inbound_webhook_complete")
 
 router = APIRouter()
 
@@ -27,114 +27,77 @@ async def get_raw_body(request: Request):
     """Obtiene el cuerpo raw de la petición"""
     return await request.body()
 
-async def send_to_leadconnector_inbound(contact_id: str, message_body: str, message_type: str, subaccount_info: dict, contact_info: dict):
+def log_complete_request(headers: dict, body: dict, raw_body: str, client_host: str):
     """
-    Función para enviar datos de inbound messages al webhook de LeadConnector
+    Función para loguear COMPLETAMENTE todo lo que llega al webhook
     """
-    if not contact_id:
-        logger.warning("⚠️ No contact_id available, skipping LeadConnector call")
-        return None
+    logger.info("=" * 80)
+    logger.info("📥 INBOUND WEBHOOK - COMPLETE REQUEST DATA")
+    logger.info("=" * 80)
     
-    leadconnector_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/8c04bdb6-054d-42cb-a77a-5769d491d8b3"
+    # 1. Información básica de la petición
+    logger.info("🔍 BASIC REQUEST INFO:")
+    logger.info(f"   • Client IP: {client_host}")
+    logger.info(f"   • Timestamp: {datetime.now().isoformat()}")
+    logger.info(f"   • Headers Count: {len(headers)}")
+    logger.info(f"   • Body Fields Count: {len(body) if body else 0}")
     
-    payload = {
-        "contact_id": contact_id,
-        "message": message_body,
-        "type": message_type,
-        "direction": "inbound",
-        "timestamp": datetime.now().isoformat(),
-        "subaccount_info": subaccount_info,
-        "contact_info": contact_info,
-        "webhook_source": "inbound_message"
+    # 2. Headers COMPLETOS
+    logger.info("📋 ALL HEADERS:")
+    for header, value in headers.items():
+        # Ocultar valores sensibles de autorización
+        if header.lower() in ['authorization', 'api-key', 'token'] and len(value) > 10:
+            logger.info(f"   • {header}: {value[:10]}...")
+        else:
+            logger.info(f"   • {header}: {value}")
+    
+    # 3. Body COMPLETO (JSON parseado)
+    logger.info("📦 PARSED JSON BODY:")
+    if body:
+        logger.info(json.dumps(body, indent=2, ensure_ascii=False))
+    else:
+        logger.info("   • Empty or non-JSON body")
+    
+    # 4. Raw Body (texto original)
+    logger.info("📄 RAW BODY (ORIGINAL):")
+    if raw_body:
+        # Mostrar máximo 2000 caracteres del raw body
+        if len(raw_body) > 2000:
+            logger.info(f"   {raw_body[:2000]}... [TRUNCATED - TOTAL: {len(raw_body)} chars]")
+        else:
+            logger.info(f"   {raw_body}")
+    else:
+        logger.info("   • Empty raw body")
+    
+    # 5. Análisis de campos comunes
+    logger.info("🎯 COMMON FIELD ANALYSIS:")
+    common_fields = {
+        'contact': ['contactId', 'contact_id', 'contactName', 'contactEmail', 'contactPhone'],
+        'message': ['body', 'message', 'text', 'content', 'message_body'],
+        'channel': ['channel', 'channelType', 'provider', 'medium', 'source'],
+        'location': ['locationId', 'location_id', 'businessId', 'business_id', 'accountId'],
+        'user': ['userId', 'user_id', 'assignedTo', 'assigned_to'],
+        'event': ['type', 'eventType', 'direction', 'status', 'timestamp']
     }
     
-    try:
-        logger.info(f"🔄 Preparing to send INBOUND to LeadConnector")
-        logger.info(f"📦 Payload: {json.dumps(payload, indent=2)}")
+    for category, fields in common_fields.items():
+        found = []
+        for field in fields:
+            if field in body:
+                value = body[field]
+                # Truncar valores largos
+                if isinstance(value, str) and len(value) > 100:
+                    value = f"{value[:100]}... [TRUNCATED]"
+                found.append(f"{field}: {value}")
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            logger.info("🚀 Sending POST request to LeadConnector...")
-            response = await client.post(
-                leadconnector_url,
-                json=payload,
-                headers={"Content-Type": "application/json"}
-            )
-            
-            logger.info(f"📤 LeadConnector Response: Status {response.status_code}")
-            
-            if response.status_code == 200:
-                logger.info("✅ Successfully sent INBOUND to LeadConnector")
-                try:
-                    return response.json()
-                except:
-                    return {"raw_response": response.text}
-            else:
-                logger.error(f"❌ LeadConnector error: {response.status_code} - {response.text}")
-                return {"error": f"Status {response.status_code}", "details": response.text}
-                
-    except Exception as e:
-        logger.error(f"🚨 Error calling LeadConnector: {str(e)}")
-        return {"error": str(e)}
-
-def extract_subaccount_info_inbound(body_content: dict, headers: dict) -> dict:
-    """
-    Extrae información de la subcuenta para inbound messages
-    """
-    subaccount_info = {}
+        if found:
+            logger.info(f"   • {category.upper()}:")
+            for item in found:
+                logger.info(f"     - {item}")
+        else:
+            logger.info(f"   • {category.upper()}: No fields found")
     
-    # Campos específicos para inbound messages
-    possible_location_fields = ['locationId', 'location_id', 'businessId', 'business_id', 'accountId', 'account_id']
-    possible_user_fields = ['userId', 'user_id', 'assignedTo', 'assigned_to']
-    
-    for field in possible_location_fields:
-        if body_content.get(field):
-            subaccount_info['location_id'] = body_content.get(field)
-            break
-    
-    for field in possible_user_fields:
-        if body_content.get(field):
-            subaccount_info['user_id'] = body_content.get(field)
-            break
-    
-    # Headers específicos
-    if 'x-account-id' in headers:
-        subaccount_info['account_id_header'] = headers['x-account-id']
-    if 'x-location-id' in headers:
-        subaccount_info['location_id_header'] = headers['x-location-id']
-    
-    # Información de canal para inbound
-    if body_content.get('channel'):
-        subaccount_info['channel'] = body_content.get('channel')
-    if body_content.get('provider'):
-        subaccount_info['provider'] = body_content.get('provider')
-    
-    return subaccount_info
-
-def extract_contact_info_inbound(body_content: dict) -> dict:
-    """
-    Extrae información del contacto para inbound messages
-    """
-    contact_info = {}
-    
-    # Información básica del contacto
-    if body_content.get('contactId'):
-        contact_info['contact_id'] = body_content.get('contactId')
-    if body_content.get('contactName'):
-        contact_info['contact_name'] = body_content.get('contactName')
-    if body_content.get('contactEmail'):
-        contact_info['contact_email'] = body_content.get('contactEmail')
-    if body_content.get('contactPhone'):
-        contact_info['contact_phone'] = body_content.get('contactPhone')
-    
-    # Información de canal y medio
-    if body_content.get('channelType'):
-        contact_info['channel_type'] = body_content.get('channelType')
-    if body_content.get('medium'):
-        contact_info['medium'] = body_content.get('medium')
-    if body_content.get('source'):
-        contact_info['source'] = body_content.get('source')
-    
-    return contact_info
+    logger.info("=" * 80)
 
 @router.post("/webhook/inbound")
 async def receive_inbound_webhook(
@@ -151,7 +114,7 @@ async def receive_inbound_webhook(
         timestamp = datetime.now().isoformat()
         headers = dict(request.headers)
         
-        # Obtener el body
+        # Obtener el body en diferentes formatos
         raw_body_text = raw_body.decode('utf-8', errors='ignore')
         
         # Intentar parsear como JSON
@@ -162,12 +125,13 @@ async def receive_inbound_webhook(
             except json.JSONDecodeError:
                 body_content = {"raw_text": raw_body_text}
         
+        # 🎯 LOG COMPLETO DE TODO LO QUE LLEGA
+        log_complete_request(headers, body_content, raw_body_text, client_host)
+        
         # Extraer datos específicos para inbound messages
         contact_id = body_content.get('contactId') or body_content.get('contact_id')
         message_body = body_content.get('body', '') or body_content.get('message', '') or body_content.get('text', '')
         message_type = body_content.get('type', 'InboundMessage')
-        direction = body_content.get('direction', 'inbound')
-        status = body_content.get('status', 'received')
         
         # Información específica de inbound
         channel = body_content.get('channel', 'Unknown')
@@ -176,49 +140,18 @@ async def receive_inbound_webhook(
         contact_email = body_content.get('contactEmail')
         contact_phone = body_content.get('contactPhone')
         
-        # 🔍 EXTRAER INFORMACIÓN DE LA SUBCUENTA Y CONTACTO
-        subaccount_info = extract_subaccount_info_inbound(body_content, headers)
-        contact_info = extract_contact_info_inbound(body_content)
-        
-        # 🎯 LOG ESPECÍFICO PARA INBOUND
-        logger.info(f"📩 INBOUND MESSAGE | 👤 {client_host} | 🕒 {timestamp}")
-        logger.info(f"👤 Contact: {contact_name} | 📞 {contact_phone} | 📧 {contact_email}")
-        logger.info(f"🔗 Contact ID: {contact_id} | 📱 Channel: {channel} | 🏢 Provider: {provider}")
-        
-        # 📊 MOSTRAR INFORMACIÓN DE LA SUBCUENTA
-        if subaccount_info:
-            logger.info(f"🏢 Subaccount Info: {json.dumps(subaccount_info, ensure_ascii=False)}")
-        
-        if message_body:
-            # Mostrar el mensaje de forma compacta
-            if len(message_body) > 500:
-                message_display = message_body[:500] + "..."
-            else:
-                message_display = message_body
-            logger.info(f"💬 Inbound Message: {message_display}")
-        else:
-            logger.info("💬 Inbound Message: ⚠️ Empty")
-
-        # 🔄 Enviar a LeadConnector
-        leadconnector_response = None
-        if contact_id:
-            logger.info(f"🔄 Sending INBOUND to LeadConnector for contact: {contact_id}")
-            leadconnector_response = await send_to_leadconnector_inbound(
-                contact_id=contact_id,
-                message_body=message_body,
-                message_type=message_type,
-                subaccount_info=subaccount_info,
-                contact_info=contact_info
-            )
-        else:
-            logger.warning("⚠️ No contact_id found, skipping LeadConnector")
-
         # Respuesta específica para inbound
         response_data = {
             "status": "success",
             "message": "Inbound webhook processed successfully",
             "timestamp": timestamp,
             "direction": "inbound",
+            "request_received": {
+                "headers_count": len(headers),
+                "body_fields_count": len(body_content),
+                "raw_body_length": len(raw_body_text),
+                "client_ip": client_host
+            },
             "contact_info": {
                 "contact_id": contact_id,
                 "contact_name": contact_name,
@@ -231,70 +164,111 @@ async def receive_inbound_webhook(
             },
             "message_data": {
                 "body": message_body,
-                "type": message_type,
-                "status": status
+                "type": message_type
             },
-            "subaccount_info": subaccount_info,
-            "leadconnector_sent": leadconnector_response is not None and "error" not in str(leadconnector_response)
+            "all_headers_keys": list(headers.keys()),
+            "all_body_keys": list(body_content.keys()) if body_content else []
         }
-
-        # Agregar respuesta de LeadConnector si existe
-        if leadconnector_response:
-            response_data["leadconnector_response"] = leadconnector_response
 
         return JSONResponse(content=response_data, status_code=200)
         
     except Exception as e:
         error_time = datetime.now().isoformat()
         logger.error(f"❌ Error processing INBOUND | 🕒 {error_time} | Error: {str(e)}")
+        logger.error(f"🔍 Headers at error: {dict(request.headers)}")
         raise HTTPException(
             status_code=400, 
             detail=f"Error processing inbound webhook: {str(e)}"
         )
 
-@router.post("/webhook/inbound/debug")
-async def debug_inbound_webhook(request: Request):
+@router.post("/webhook/inbound/raw")
+async def receive_inbound_webhook_raw(
+    request: Request,
+    raw_body: bytes = Depends(get_raw_body)
+):
     """
-    Endpoint para debuggear inbound webhooks
+    Endpoint alternativo que muestra TODO sin procesamiento
     """
+    client_host = request.client.host if request.client else "Unknown"
     headers = dict(request.headers)
-    body = await request.json()
     
-    # Campos específicos para inbound
-    inbound_fields = {
-        'contact_fields': ['contactId', 'contact_id', 'contactName', 'contactEmail', 'contactPhone'],
-        'channel_fields': ['channel', 'channelType', 'provider', 'medium', 'source'],
-        'message_fields': ['body', 'message', 'text', 'direction', 'type', 'status'],
-        'location_fields': ['locationId', 'location_id', 'businessId', 'business_id']
-    }
+    # Obtener body en diferentes formatos
+    raw_body_text = raw_body.decode('utf-8', errors='ignore')
     
-    found_fields = {}
+    # Intentar parsear JSON
+    try:
+        parsed_body = json.loads(raw_body_text) if raw_body_text.strip() else {}
+    except:
+        parsed_body = {"raw_text": raw_body_text}
     
-    for category, fields in inbound_fields.items():
-        found_fields[category] = {}
-        for field in fields:
-            if field in body:
-                found_fields[category][field] = body[field]
+    # Log completo
+    logger.info("🔄 RAW ENDPOINT CALLED - COMPLETE DATA DUMP")
+    log_complete_request(headers, parsed_body, raw_body_text, client_host)
     
     return {
-        "webhook_type": "inbound_debug",
-        "all_headers": headers,
-        "all_body_fields": body,
-        "categorized_fields": found_fields,
-        "timestamp": datetime.now().isoformat()
+        "status": "raw_data_received",
+        "timestamp": datetime.now().isoformat(),
+        "client_ip": client_host,
+        "headers": headers,
+        "body": parsed_body,
+        "raw_body_preview": raw_body_text[:500] + "..." if len(raw_body_text) > 500 else raw_body_text,
+        "raw_body_length": len(raw_body_text)
     }
 
-@router.get("/inbound")
-async def inbound_root():
+@router.api_route("/webhook/inbound/catch-all", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def catch_all_inbound_webhook(request: Request):
     """
-    Endpoint raíz para inbound webhooks
+    Endpoint que captura CUALQUIER método HTTP
+    """
+    client_host = request.client.host if request.client else "Unknown"
+    method = request.method
+    headers = dict(request.headers)
+    
+    # Obtener body
+    raw_body = await request.body()
+    raw_body_text = raw_body.decode('utf-8', errors='ignore')
+    
+    # Intentar parsear JSON
+    try:
+        parsed_body = json.loads(raw_body_text) if raw_body_text.strip() else {}
+    except:
+        parsed_body = {"raw_text": raw_body_text}
+    
+    logger.info(f"🎯 CATCH-ALL ENDPOINT - METHOD: {method}")
+    log_complete_request(headers, parsed_body, raw_body_text, client_host)
+    
+    return {
+        "status": "catch_all_received",
+        "method": method,
+        "timestamp": datetime.now().isoformat(),
+        "client_ip": client_host,
+        "headers_count": len(headers),
+        "body_fields_count": len(parsed_body),
+        "raw_body_length": len(raw_body_text)
+    }
+
+@router.get("/inbound/debug")
+async def inbound_debug_dashboard():
+    """
+    Dashboard de debug para ver los últimos webhooks recibidos
     """
     return {
-        "message": "🚀 GHL Inbound Webhook Server Active",
+        "message": "🔍 GHL Inbound Webhook Debug Dashboard",
         "endpoints": {
-            "/webhook/inbound": "POST - Para inbound messages",
-            "/webhook/inbound/debug": "POST - Para debuggear inbound webhooks"
+            "/webhook/inbound": "POST - Procesamiento normal con logging completo",
+            "/webhook/inbound/raw": "POST - Solo logging sin procesamiento",
+            "/webhook/inbound/catch-all": "ANY METHOD - Captura cualquier método HTTP",
+            "/inbound/debug": "GET - Este dashboard"
         },
-        "supported_channels": ["sms", "whatsapp", "messenger", "instagram", "email"],
+        "logging": {
+            "file": "webhook_inbound_complete.log",
+            "level": "INFO - Completo"
+        },
+        "features": {
+            "logs_all_headers": True,
+            "logs_complete_body": True,
+            "logs_raw_body": True,
+            "field_analysis": True
+        },
         "timestamp": datetime.now().isoformat()
     }
