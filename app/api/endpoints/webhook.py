@@ -22,64 +22,68 @@ raw_data_store = []
 async def get_raw_body(request: Request):
     return await request.body()
 
+def search_nested_value(data: dict, search_keys: list) -> any:
+    """
+    Busca un valor en un diccionario, incluyendo objetos anidados
+    """
+    # Buscar en nivel superior
+    for key in search_keys:
+        if key in data and data[key]:
+            return data[key]
+    
+    # Buscar en objetos anidados
+    for key, value in data.items():
+        if isinstance(value, dict):
+            result = search_nested_value(value, search_keys)
+            if result:
+                return result
+    
+    return None
+
 def extract_message_info(data: dict) -> dict:
     """
     Extrae información específica de mensajes del webhook
     """
     message_info = {
         "contact_id": None,
-        "messages": [],
-        "conversation": None,
+        "message": None,
         "timestamp": None,
-        "direction": None
+        "direction": None,
+        "additional_info": {}
     }
     
-    # Buscar contact_id en diferentes campos posibles
+    # Buscar contact_id
     contact_fields = ['contactId', 'contact_id', 'id', 'userId', 'user_id']
-    for field in contact_fields:
-        if field in data and data[field]:
-            message_info["contact_id"] = data[field]
-            break
+    message_info["contact_id"] = search_nested_value(data, contact_fields)
+    
+    # Buscar mensaje (ahora también en objetos anidados)
+    message_fields = ['message', 'body', 'text', 'content', 'messageBody']
+    message_info["message"] = search_nested_value(data, message_fields)
     
     # Buscar timestamp
-    timestamp_fields = ['timestamp', 'createdAt', 'date', 'time', 'dateAdded', 'Timestamp Respuesta']
-    for field in timestamp_fields:
-        if field in data and data[field]:
-            message_info["timestamp"] = data[field]
-            break
+    timestamp_fields = ['timestamp', 'time', 'createdAt', 'date', 'dateAdded', 'date_created', 
+                       'Timestamp Respuesta', 'dateCreated', 'created_at']
+    message_info["timestamp"] = search_nested_value(data, timestamp_fields)
     
     # Buscar dirección del mensaje
     direction_fields = ['direction', 'type', 'messageType', 'messageDirection']
-    for field in direction_fields:
-        if field in data and data[field]:
-            message_info["direction"] = data[field]
-            break
+    message_info["direction"] = search_nested_value(data, direction_fields)
     
-    # Buscar el mensaje en diferentes campos
-    message_fields = ['body', 'message', 'text', 'content', 'messageBody']
-    for field in message_fields:
-        if field in data and data[field]:
-            message_info["messages"].append({
-                "field_name": field,
-                "content": data[field],
-                "length": len(str(data[field]))
-            })
+    # Información adicional útil
+    if 'first_name' in data:
+        message_info["additional_info"]["first_name"] = data['first_name']
+    if 'full_name' in data:
+        message_info["additional_info"]["full_name"] = data['full_name']
+    if 'phone' in data:
+        message_info["additional_info"]["phone"] = data['phone']
+    if 'mensajes salientes' in data:
+        message_info["additional_info"]["mensajes_salientes"] = data['mensajes salientes']
+    if 'Mensajes del cliente' in data:
+        message_info["additional_info"]["mensajes_cliente"] = data['Mensajes del cliente']
     
     # Buscar conversación completa
     if 'GPT - Full Conversation' in data and data['GPT - Full Conversation']:
-        message_info["conversation"] = data['GPT - Full Conversation']
-    
-    # Buscar arrays de mensajes
-    for key, value in data.items():
-        if isinstance(value, list) and len(value) > 0:
-            if isinstance(value[0], dict):
-                # Verificar si parece ser un array de mensajes
-                if any(msg_field in value[0] for msg_field in ['body', 'message', 'text', 'content']):
-                    message_info["messages"].append({
-                        "field_name": f"{key} (array)",
-                        "content": value,
-                        "count": len(value)
-                    })
+        message_info["additional_info"]["conversation"] = data['GPT - Full Conversation']
     
     return message_info
 
@@ -106,69 +110,54 @@ async def receive_raw_webhook(
             parsed_body = {"raw_text": raw_body_text}
         
         # ============================================
-        # MOSTRAR INFORMACIÓN DE MENSAJES
+        # EXTRAER Y MOSTRAR INFORMACIÓN DE MENSAJES
         # ============================================
-        logger.info("=" * 100)
-        logger.info(f"📨 MENSAJE RECIBIDO - {timestamp}")
-        logger.info("=" * 100)
-        
-        # Extraer info de mensajes
         message_info = extract_message_info(parsed_body)
         
-        # MOSTRAR: Contact ID
-        logger.info(f"👤 CONTACT ID: {message_info['contact_id'] or '❌ No encontrado'}")
+        logger.info("=" * 100)
+        logger.info(f"📨 WEBHOOK RECIBIDO - {timestamp}")
+        logger.info("=" * 100)
+        logger.info("")
         
-        # MOSTRAR: Timestamp
-        logger.info(f"🕐 TIMESTAMP: {message_info['timestamp'] or '❌ No encontrado'}")
+        # INFORMACIÓN PRINCIPAL
+        logger.info("📋 INFORMACIÓN DEL MENSAJE:")
+        logger.info("")
+        logger.info(f"  👤 Contact ID:    {message_info['contact_id'] or '❌ No encontrado'}")
+        logger.info(f"  💬 Mensaje:       {message_info['message'] or '❌ No encontrado'}")
+        logger.info(f"  🕐 Timestamp:     {message_info['timestamp'] or '❌ No encontrado'}")
+        logger.info(f"  📍 Dirección:     {message_info['direction'] or '❌ No encontrado'}")
+        logger.info("")
         
-        # MOSTRAR: Dirección
-        logger.info(f"📍 DIRECCIÓN: {message_info['direction'] or '❌ No encontrado'}")
-        
-        logger.info("-" * 100)
-        
-        # MOSTRAR: Mensajes encontrados
-        if message_info['messages']:
-            logger.info(f"💬 MENSAJES ENCONTRADOS ({len(message_info['messages'])}):")
+        # INFORMACIÓN ADICIONAL
+        if message_info["additional_info"]:
+            logger.info("ℹ️  INFORMACIÓN ADICIONAL:")
             logger.info("")
-            for idx, msg in enumerate(message_info['messages'], 1):
-                logger.info(f"  Mensaje #{idx} - Campo: '{msg['field_name']}'")
-                if isinstance(msg['content'], str):
-                    logger.info(f"  Contenido: {msg['content']}")
-                    logger.info(f"  Longitud: {msg['length']} caracteres")
-                elif isinstance(msg['content'], list):
-                    logger.info(f"  Tipo: Array con {msg['count']} elementos")
-                    logger.info(f"  Contenido: {json.dumps(msg['content'], indent=4, ensure_ascii=False)}")
-                logger.info("")
-        else:
-            logger.info("💬 MENSAJES: ❌ No se encontraron mensajes")
+            for key, value in message_info["additional_info"].items():
+                if key != "conversation":  # La conversación la mostramos aparte
+                    logger.info(f"  • {key}: {value}")
             logger.info("")
         
-        # MOSTRAR: Conversación completa si existe
-        if message_info['conversation']:
+        # CONVERSACIÓN COMPLETA (si existe)
+        if "conversation" in message_info["additional_info"]:
             logger.info("🗨️  CONVERSACIÓN COMPLETA:")
-            logger.info(f"{message_info['conversation']}")
+            logger.info("")
+            conv = message_info["additional_info"]["conversation"]
+            if len(str(conv)) > 500:
+                logger.info(f"  {str(conv)[:500]}...")
+                logger.info(f"  [...continúa - total: {len(str(conv))} caracteres]")
+            else:
+                logger.info(f"  {conv}")
             logger.info("")
         
         logger.info("=" * 100)
-        
-        # Log adicional: campos disponibles
-        logger.info("📋 CAMPOS DISPONIBLES EN EL WEBHOOK:")
-        non_empty_fields = {k: v for k, v in parsed_body.items() if v not in ["", None, [], {}]}
-        logger.info(f"Total de campos con datos: {len(non_empty_fields)}")
         logger.info("")
-        for key, value in non_empty_fields.items():
-            value_preview = str(value)[:100] if len(str(value)) > 100 else str(value)
-            logger.info(f"  • {key}: {value_preview}")
-        logger.info("")
-        logger.info("=" * 100)
         
         # Almacenar
         entry = {
             "timestamp": timestamp,
             "client_ip": client_ip,
             "message_info": message_info,
-            "raw_body_size": len(raw_body_text),
-            "parsed_fields_count": len(parsed_body) if isinstance(parsed_body, dict) else 0
+            "raw_body_size": len(raw_body_text)
         }
         raw_data_store.append(entry)
         
@@ -179,12 +168,11 @@ async def receive_raw_webhook(
         return JSONResponse(content={
             "status": "received",
             "timestamp": timestamp,
-            "message_data": {
+            "extracted_data": {
                 "contact_id": message_info["contact_id"],
+                "message": message_info["message"],
                 "timestamp": message_info["timestamp"],
-                "direction": message_info["direction"],
-                "messages_count": len(message_info["messages"]),
-                "has_conversation": bool(message_info["conversation"])
+                "direction": message_info["direction"]
             }
         }, status_code=200)
         
@@ -192,6 +180,8 @@ async def receive_raw_webhook(
         error_time = datetime.now().isoformat()
         logger.error(f"❌ ERROR - {error_time}")
         logger.error(f"Detalles: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
 
 @router.get("/webhook/raw/stats")
@@ -205,8 +195,9 @@ async def get_raw_stats():
         }
     
     total_requests = len(raw_data_store)
-    messages_with_content = sum(1 for e in raw_data_store if e["message_info"]["messages"])
+    messages_with_content = sum(1 for e in raw_data_store if e["message_info"]["message"])
     messages_with_contact = sum(1 for e in raw_data_store if e["message_info"]["contact_id"])
+    messages_with_timestamp = sum(1 for e in raw_data_store if e["message_info"]["timestamp"])
     
     recent = raw_data_store[-10:]
     
@@ -217,14 +208,43 @@ async def get_raw_stats():
             "total_webhooks": total_requests,
             "webhooks_with_messages": messages_with_content,
             "webhooks_with_contact_id": messages_with_contact,
+            "webhooks_with_timestamp": messages_with_timestamp,
             "success_rate": f"{(messages_with_content/total_requests*100):.1f}%" if total_requests > 0 else "0%"
         },
         "recent_messages": [
             {
                 "timestamp": e["timestamp"],
                 "contact_id": e["message_info"]["contact_id"],
-                "message_count": len(e["message_info"]["messages"]),
+                "message": e["message_info"]["message"],
+                "message_timestamp": e["message_info"]["timestamp"],
                 "direction": e["message_info"]["direction"]
+            }
+            for e in recent
+        ]
+    }
+
+@router.get("/webhook/raw/last")
+async def get_last_messages(limit: int = 5):
+    """Obtiene los últimos N mensajes recibidos"""
+    if not raw_data_store:
+        return {
+            "status": "no_data",
+            "message": "No hay mensajes aún"
+        }
+    
+    recent = raw_data_store[-limit:]
+    
+    return {
+        "status": "success",
+        "count": len(recent),
+        "messages": [
+            {
+                "received_at": e["timestamp"],
+                "contact_id": e["message_info"]["contact_id"],
+                "message": e["message_info"]["message"],
+                "message_timestamp": e["message_info"]["timestamp"],
+                "direction": e["message_info"]["direction"],
+                "additional_info": e["message_info"]["additional_info"]
             }
             for e in recent
         ]
@@ -234,14 +254,16 @@ async def get_raw_stats():
 async def root():
     return {
         "service": "Message Webhook Receiver",
-        "version": "2.0",
+        "version": "2.1 - Fixed Nested Search",
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
             "POST /webhook/raw": "Recibe webhooks y extrae mensajes",
-            "GET /webhook/raw/stats": "Estadísticas de mensajes"
+            "GET /webhook/raw/stats": "Estadísticas de mensajes",
+            "GET /webhook/raw/last?limit=N": "Últimos N mensajes recibidos"
         },
         "stats": {
             "total_received": len(raw_data_store),
-            "last_message": raw_data_store[-1]["timestamp"] if raw_data_store else None
+            "last_message_at": raw_data_store[-1]["timestamp"] if raw_data_store else None,
+            "last_message": raw_data_store[-1]["message_info"]["message"] if raw_data_store else None
         }
     }
