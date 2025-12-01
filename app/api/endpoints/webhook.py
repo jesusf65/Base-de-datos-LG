@@ -3,379 +3,450 @@ from fastapi.responses import JSONResponse
 from typing import Dict, Any, Optional, List
 import logging
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import re
-import statistics
 
-# Configuración de logging
+# Configuración de logging más clara
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s | %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('form_response_times.log', encoding='utf-8')
+        logging.FileHandler('all_messages_detailed.log', encoding='utf-8')
     ]
 )
-logger = logging.getLogger("form_response_tracker")
+logger = logging.getLogger("all_messages_tracker")
 
 router = APIRouter()
 
-# Almacenamiento para métricas de formularios
-form_metrics_store = {
-    "submissions": [],
-    "contact_metrics": {},
-    "response_time_stats": []
-}
+# Almacenamiento simple para ver histórico
+message_history = []
 
 async def get_raw_body(request: Request):
     return await request.body()
 
-def extract_time_from_string(time_string: str) -> float:
+def detect_message_direction(payload: dict) -> str:
     """
-    Convierte strings de tiempo como "1 hora con 34 minutos" a minutos
+    Detecta si es MENSAJE ENTRANTE o MENSAJE SALIENTE
     """
-    if not time_string or not isinstance(time_string, str):
-        return None
+    # 1. Por campo explícito 'direction'
+    direction = payload.get('direction', '').lower()
+    if direction == 'inbound':
+        return "ENTRANTE"
+    elif direction == 'outbound':
+        return "SALIENTE"
     
-    time_string = time_string.lower()
+    # 2. Por campo 'type'
+    msg_type = payload.get('type', '').lower()
+    if 'inbound' in msg_type:
+        return "ENTRANTE"
+    elif 'outbound' in msg_type:
+        return "SALIENTE"
     
-    try:
-        # Patrón para "X hora(s) con Y minuto(s)"
-        pattern1 = r'(\d+)\s*hora(?:\w*)\s*con\s*(\d+)\s*minuto'
-        match1 = re.search(pattern1, time_string)
-        if match1:
-            horas = int(match1.group(1))
-            minutos = int(match1.group(2))
-            return horas * 60 + minutos
-        
-        # Patrón para "X hora(s) Y minuto(s)"  
-        pattern2 = r'(\d+)\s*hora(?:\w*)\s*(\d+)\s*minuto'
-        match2 = re.search(pattern2, time_string)
-        if match2:
-            horas = int(match2.group(1))
-            minutos = int(match2.group(2))
-            return horas * 60 + minutos
-        
-        # Patrón para solo horas
-        pattern3 = r'(\d+)\s*hora'
-        match3 = re.search(pattern3, time_string)
-        if match3:
-            return int(match3.group(1)) * 60
-        
-        # Patrón para solo minutos
-        pattern4 = r'(\d+)\s*minuto'
-        match4 = re.search(pattern4, time_string)
-        if match4:
-            return int(match4.group(1))
-        
-        # Intentar convertir directamente si es número
-        if time_string.replace('.', '').isdigit():
-            return float(time_string)
-            
-    except Exception as e:
-        logger.warning(f"⚠️ Could not parse time string: {time_string} - Error: {e}")
+    # 3. Por campos específicos de GHL
+    event_type = payload.get('eventType', '').lower()
+    if 'inbound' in event_type:
+        return "ENTRANTE"
+    elif 'outbound' in event_type:
+        return "SALIENTE"
     
-    return None
+    # 4. Por lógica de contenido (análisis de texto)
+    content = get_message_content(payload)
+    if content:
+        content_lower = content.lower()
+        
+        # Palabras comunes en mensajes entrantes (del cliente)
+        inbound_keywords = [
+            'hola', 'hi', 'hello', 'buenos días', 'buenas tardes',
+            'información', 'precio', 'costo', 'cotización', 'me interesa',
+            'quiero', 'necesito', 'ayuda', 'duda', 'pregunta', 'problema',
+            'disponible', 'tienen', 'venden', 'ofrecen'
+        ]
+        
+        # Palabras comunes en mensajes salientes (del negocio)
+        outbound_keywords = [
+            'gracias', 'thank you', 'te ayudo', 'en breve', 'agente',
+            'asesor', 'bienvenido', 'te contacto', 'llamada', 'cita',
+            'horario', 'disponibilidad', 'oferta', 'promoción', 'descuento',
+            'seguimiento', 'recordatorio', 'confirmación'
+        ]
+        
+        inbound_count = sum(1 for word in inbound_keywords if word in content_lower)
+        outbound_count = sum(1 for word in outbound_keywords if word in content_lower)
+        
+        if inbound_count > outbound_count:
+            return "ENTRANTE"
+        elif outbound_count > inbound_count:
+            return "SALIENTE"
+    
+    # 5. Por campos de origen/destino
+    if payload.get('fromCustomer') or payload.get('from_contact'):
+        return "ENTRANTE"
+    elif payload.get('toCustomer') or payload.get('campaignId'):
+        return "SALIENTE"
+    
+    return "INDETERMINADO"
 
-def extract_form_metrics(form_data: dict) -> Dict[str, Any]:
+def get_message_content(payload: dict) -> str:
     """
-    Extrae métricas clave del formulario de 110 campos
+    Obtiene el contenido del mensaje de cualquier campo posible
     """
-    contact_id = form_data.get('contactId') or form_data.get('contact_id')
-    contact_phone = form_data.get('contactPhone') or form_data.get('contactPhone')
-    contact_name = form_data.get('contactName') or form_data.get('contactName') or 'Unknown'
-    
-    # Extraer tiempo de respuesta
-    response_time_str = None
-    response_time_minutes = None
-    
-    # Buscar en diferentes campos posibles de tiempo
-    time_fields = [
-        'Tiempo hasta primer mensaje enviado',
-        'Tiempo de respuesta',
-        'Response Time',
-        'Wait Time',
-        'Hora respuesta del vendedor'
+    content_fields = [
+        'body', 'message', 'text', 'content', 'message_body',
+        'smsContent', 'whatsappMessage', 'value', 'data'
     ]
     
-    for field in time_fields:
-        if field in form_data and form_data[field]:
-            response_time_str = form_data[field]
-            response_time_minutes = extract_time_from_string(response_time_str)
-            if response_time_minutes is not None:
-                break
+    for field in content_fields:
+        if field in payload:
+            value = payload[field]
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            elif isinstance(value, dict):
+                # Buscar en subcampos
+                for sub_field in content_fields:
+                    if sub_field in value and isinstance(value[sub_field], str) and value[sub_field].strip():
+                        return value[sub_field].strip()
     
-    # Extraer cantidad de mensajes
-    messages_sent = None
-    message_fields = [
-        'mensajes salientes',
-        'mensajes_enviados',
-        'messages_sent',
-        'outbound_messages'
-    ]
-    
-    for field in message_fields:
-        if field in form_data and form_data[field]:
-            try:
-                messages_sent = int(form_data[field])
-                break
-            except:
-                pass
-    
-    # Timestamps importantes
-    first_message_time = form_data.get('Hora de primer mensaje') or form_data.get('Primer mensaje registrado')
-    response_timestamp = form_data.get('Timestamp Respuesta') or form_data.get('Hora respuesta del vendedor')
-    
-    # Fuente del lead
-    lead_source = form_data.get('Fuente del lead') or form_data.get('Canal') or 'unknown'
-    
-    return {
-        "contact_id": contact_id,
-        "contact_name": contact_name,
-        "contact_phone": contact_phone,
-        "response_time_string": response_time_str,
-        "response_time_minutes": response_time_minutes,
-        "messages_sent": messages_sent,
-        "first_message_time": first_message_time,
-        "response_timestamp": response_timestamp,
-        "lead_source": lead_source,
-        "submission_timestamp": datetime.now().isoformat(),
-        "total_form_fields": len(form_data),
-        "fields_with_data": sum(1 for v in form_data.values() if v and str(v).strip())
-    }
+    return ""
 
-def calculate_form_response_stats():
+def log_complete_payload(payload: dict, direction: str, headers: dict, client_ip: str):
     """
-    Calcula estadísticas basadas en los formularios recibidos
+    Muestra TODA la información del payload de forma organizada
     """
-    submissions = form_metrics_store["submissions"]
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    if not submissions:
-        return {
-            "total_submissions": 0,
-            "message": "No form submissions yet"
-        }
+    # Separador visual basado en dirección
+    if direction == "ENTRANTE":
+        separator = "📩" + "=" * 78 + "📩"
+        title = "📩 MENSAJE ENTRANTE (INBOUND)"
+    elif direction == "SALIENTE":
+        separator = "📤" + "=" * 78 + "📤"
+        title = "📤 MENSAJE SALIENTE (OUTBOUND)"
+    else:
+        separator = "❓" + "=" * 78 + "❓"
+        title = "❓ MENSAJE DE DIRECCIÓN DESCONOCIDA"
     
-    # Filtrar submissions con tiempos de respuesta válidos
-    valid_response_times = [s for s in submissions if s['response_time_minutes'] is not None]
-    response_times_minutes = [s['response_time_minutes'] for s in valid_response_times]
+    logger.info(separator)
+    logger.info(f"{title}")
+    logger.info(f"🕒 HORA RECEPCIÓN: {timestamp}")
+    logger.info(f"🌐 IP CLIENTE: {client_ip}")
+    logger.info(separator)
     
-    stats = {
-        "total_submissions": len(submissions),
-        "submissions_with_response_times": len(valid_response_times),
-        "coverage_rate": f"{(len(valid_response_times) / len(submissions) * 100):.1f}%" if submissions else "0%"
-    }
+    # 1. INFORMACIÓN DE CONTACTO
+    logger.info("👤 INFORMACIÓN DE CONTACTO:")
+    contact_fields = ['contactId', 'contact_id', 'contactName', 'contact_name', 
+                     'contactPhone', 'contact_phone', 'contactEmail', 'contact_email',
+                     'from', 'to', 'phone', 'email', 'firstName', 'lastName']
     
-    if response_times_minutes:
-        stats.update({
-            "average_response_minutes": round(statistics.mean(response_times_minutes), 2),
-            "median_response_minutes": round(statistics.median(response_times_minutes), 2),
-            "min_response_minutes": round(min(response_times_minutes), 2),
-            "max_response_minutes": round(max(response_times_minutes), 2),
-            "response_time_range": f"{min(response_times_minutes)} - {max(response_times_minutes)} minutes"
-        })
-        
-        # Análisis de desempeño
-        avg_time = stats['average_response_minutes']
-        if avg_time < 5:
-            stats["performance"] = "Excellent"
-            stats["recommendation"] = "Outstanding response times!"
-        elif avg_time < 15:
-            stats["performance"] = "Good" 
-            stats["recommendation"] = "Good response times. Aim for under 5 minutes."
-        elif avg_time < 60:
-            stats["performance"] = "Needs Improvement"
-            stats["recommendation"] = "Focus on reducing response times to under 15 minutes."
+    contact_info_found = False
+    for field in contact_fields:
+        if field in payload and payload[field]:
+            logger.info(f"   • {field}: {payload[field]}")
+            contact_info_found = True
+    
+    if not contact_info_found:
+        logger.info("   • No se encontró información de contacto")
+    
+    # 2. CONTENIDO DEL MENSAJE
+    logger.info("💬 CONTENIDO DEL MENSAJE:")
+    content = get_message_content(payload)
+    if content:
+        if len(content) > 200:
+            logger.info(f"   {content[:200]}... [TRUNCADO - TOTAL: {len(content)} caracteres]")
         else:
-            stats["performance"] = "Poor"
-            stats["recommendation"] = "Immediate action required to improve response times."
+            logger.info(f"   {content}")
+    else:
+        logger.info("   • [SIN CONTENIDO DE TEXTO]")
     
-    # Estadísticas de mensajes
-    valid_message_counts = [s for s in submissions if s['messages_sent'] is not None]
-    if valid_message_counts:
-        message_counts = [s['messages_sent'] for s in valid_message_counts]
-        stats["message_stats"] = {
-            "average_messages_per_contact": round(statistics.mean(message_counts), 2),
-            "total_messages_tracked": sum(message_counts),
-            "contacts_with_message_data": len(valid_message_counts)
-        }
+    # 3. METADATOS IMPORTANTES
+    logger.info("📊 METADATOS PRINCIPALES:")
+    important_fields = [
+        'timestamp', 'time', 'createdAt', 'date', 'eventType',
+        'channel', 'channelType', 'platform', 'medium', 'source',
+        'conversationId', 'conversation_id', 'messageId', 'id',
+        'locationId', 'location_id', 'userId', 'user_id'
+    ]
     
-    return stats
+    for field in important_fields:
+        if field in payload:
+            value = payload[field]
+            if isinstance(value, str) and len(value) > 100:
+                logger.info(f"   • {field}: {value[:100]}...")
+            else:
+                logger.info(f"   • {field}: {value}")
+    
+    # 4. TODOS LOS CAMPOS DISPONIBLES (resumen)
+    logger.info("📋 TODOS LOS CAMPOS DISPONIBLES:")
+    all_fields = list(payload.keys())
+    total_fields = len(all_fields)
+    
+    if total_fields <= 20:
+        for field in all_fields:
+            if field not in important_fields and field not in contact_fields:
+                value = payload[field]
+                value_str = str(value)
+                if len(value_str) > 50:
+                    value_str = value_str[:50] + "..."
+                logger.info(f"   • {field}: {value_str}")
+    else:
+        logger.info(f"   • Total de campos: {total_fields}")
+        logger.info(f"   • Primeros 10 campos: {', '.join(all_fields[:10])}")
+        logger.info(f"   • ... y {total_fields - 10} campos más")
+    
+    # 5. HEADERS IMPORTANTES
+    logger.info("🌐 INFORMACIÓN DE CONEXIÓN:")
+    important_headers = ['user-agent', 'content-type', 'content-length', 
+                        'x-forwarded-for', 'x-real-ip', 'host']
+    
+    for header in important_headers:
+        if header in headers:
+            logger.info(f"   • {header}: {headers[header]}")
+    
+    logger.info(separator + "\n")
 
-@router.post("/webhook/form-submission")
-async def receive_form_submission(
+@router.post("/webhook/messages")
+async def receive_all_messages(
     request: Request,
     raw_body: bytes = Depends(get_raw_body)
 ):
     """
-    Endpoint específico para formularios de 110 campos
+    Endpoint principal que muestra TODA la información recibida
     """
     try:
-        client_host = request.client.host if request.client else "Unknown"
+        # Obtener información básica
+        client_ip = request.client.host if request.client else "Desconocida"
+        headers = dict(request.headers)
         
+        # Leer y parsear el body
         raw_body_text = raw_body.decode('utf-8', errors='ignore')
         
         try:
-            form_data = json.loads(raw_body_text) if raw_body_text.strip() else {}
+            payload = json.loads(raw_body_text) if raw_body_text.strip() else {}
         except json.JSONDecodeError:
-            form_data = {"raw_text": raw_body_text}
+            payload = {"raw_text": raw_body_text}
         
-        # Extraer métricas del formulario
-        metrics = extract_form_metrics(form_data)
+        # Detectar dirección del mensaje
+        direction = detect_message_direction(payload)
         
-        # Log detallado
-        logger.info("📋 FORM SUBMISSION RECEIVED")
-        logger.info(f"👤 Contact: {metrics['contact_name']} | 📞 {metrics['contact_phone']}")
-        logger.info(f"🆔 Contact ID: {metrics['contact_id']}")
+        # Log completo del payload
+        log_complete_payload(payload, direction, headers, client_ip)
         
-        if metrics['response_time_string']:
-            logger.info(f"⏱️ Response Time: {metrics['response_time_string']} → {metrics['response_time_minutes']} minutes")
-        else:
-            logger.warning("⚠️ No response time data found in form")
+        # Guardar en histórico
+        message_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "direction": direction,
+            "client_ip": client_ip,
+            "payload_size": len(raw_body_text),
+            "field_count": len(payload),
+            "has_content": bool(get_message_content(payload))
+        }
+        message_history.append(message_entry)
         
-        if metrics['messages_sent'] is not None:
-            logger.info(f"📤 Messages Sent: {metrics['messages_sent']}")
+        # Mantener solo últimos 1000 registros
+        if len(message_history) > 1000:
+            message_history.pop(0)
         
-        logger.info(f"📊 Form Analysis: {metrics['fields_with_data']}/{metrics['total_form_fields']} fields with data")
-        
-        # Almacenar métricas
-        form_metrics_store["submissions"].append(metrics)
-        
-        # Actualizar por contacto
-        if metrics['contact_id'] and metrics['contact_id'] != 'unknown':
-            form_metrics_store["contact_metrics"][metrics['contact_id']] = metrics
-        
-        # Limpiar datos antiguos (más de 30 días)
-        cleanup_old_submissions()
-        
-        # Calcular estadísticas
-        stats = calculate_form_response_stats()
+        # Preparar respuesta
+        content = get_message_content(payload)
         
         response_data = {
             "status": "success",
-            "message": "Form submission processed for response time tracking",
-            "metrics_extracted": {
-                "response_time_detected": metrics['response_time_minutes'] is not None,
-                "messages_detected": metrics['messages_sent'] is not None,
-                "contact_identified": metrics['contact_id'] != 'unknown'
+            "timestamp": datetime.now().isoformat(),
+            "message_type": direction,
+            "summary": {
+                "total_fields_received": len(payload),
+                "payload_size_bytes": len(raw_body_text),
+                "message_content_found": bool(content),
+                "content_length": len(content) if content else 0,
+                "detection_method": "Análisis automático de contenido"
             },
-            "current_stats": stats
+            "contact_info": {
+                "contact_id": payload.get('contactId') or payload.get('contact_id'),
+                "contact_name": payload.get('contactName') or payload.get('contact_name'),
+                "contact_phone": payload.get('contactPhone') or payload.get('contact_phone')
+            },
+            "message_content": content if content else "[Sin contenido de texto]"
         }
         
         return JSONResponse(content=response_data, status_code=200)
         
     except Exception as e:
-        logger.error(f"❌ Error processing form submission: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
+        error_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logger.error(f"❌ ERROR PROCESANDO MENSAJE | {error_time}")
+        logger.error(f"🔧 Detalle del error: {str(e)}")
+        
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Error procesando mensaje: {str(e)}"
+        )
 
-def cleanup_old_submissions(days=30):
-    """
-    Limpia submissions antiguos
-    """
-    cutoff_time = datetime.now() - timedelta(days=days)
-    submissions_to_keep = []
-    
-    for submission in form_metrics_store["submissions"]:
-        try:
-            submission_time = datetime.fromisoformat(submission['submission_timestamp'].replace('Z', '+00:00'))
-            if submission_time > cutoff_time:
-                submissions_to_keep.append(submission)
-        except:
-            submissions_to_keep.append(submission)
-    
-    if len(submissions_to_keep) < len(form_metrics_store["submissions"]):
-        removed = len(form_metrics_store["submissions"]) - len(submissions_to_keep)
-        form_metrics_store["submissions"] = submissions_to_keep
-        logger.info(f"🧹 Cleaned up {removed} old form submissions")
-
-@router.get("/webhook/response-times/dashboard")
-async def form_response_dashboard():
-    """
-    Dashboard de tiempos de respuesta basado en formularios
-    """
-    stats = calculate_form_response_stats()
-    
-    # Últimas 5 submissions
-    recent_submissions = form_metrics_store["submissions"][-5:] if form_metrics_store["submissions"] else []
-    
-    return {
-        "dashboard": "📊 Form Response Times Dashboard",
-        "timestamp": datetime.now().isoformat(),
-        "overview": {
-            "total_form_submissions": stats["total_submissions"],
-            "submissions_with_time_data": stats.get("submissions_with_response_times", 0),
-            "data_coverage_rate": stats.get("coverage_rate", "0%")
-        },
-        "response_time_metrics": {
-            "average_minutes": stats.get("average_response_minutes", "No data"),
-            "median_minutes": stats.get("median_response_minutes", "No data"),
-            "performance_rating": stats.get("performance", "No data"),
-            "recommendation": stats.get("recommendation", "Collect more data")
-        },
-        "recent_activity": {
-            "last_5_submissions": [
-                {
-                    "contact": sub["contact_name"],
-                    "phone": sub["contact_phone"],
-                    "response_time": sub["response_time_string"],
-                    "response_minutes": sub["response_time_minutes"],
-                    "messages_sent": sub["messages_sent"]
-                }
-                for sub in recent_submissions
-            ]
-        },
-        "message_metrics": stats.get("message_stats", {})
-    }
-
-@router.get("/webhook/response-times/raw-data")
-async def get_raw_form_data(limit: int = 20):
-    """
-    Obtiene los datos crudos de formularios para análisis
-    """
-    submissions = form_metrics_store["submissions"][-limit:] if form_metrics_store["submissions"] else []
-    
-    return {
-        "status": "success",
-        "timestamp": datetime.now().isoformat(),
-        "total_stored": len(form_metrics_store["submissions"]),
-        "requested_limit": limit,
-        "submissions": submissions
-    }
-
-# Endpoint de compatibilidad
-@router.post("/webhook/inbound")
-async def backward_compatibility_form(
+@router.post("/webhook/messages/simple")
+async def receive_messages_simple(
     request: Request,
     raw_body: bytes = Depends(get_raw_body)
 ):
     """
-    Endpoint de compatibilidad que procesa el formulario de 110 campos
+    Versión simplificada para logs más limpios
     """
-    return await receive_form_submission(request, raw_body)
-
-@router.get("/webhook/form-stats/help")
-async def form_stats_help():
-    """
-    Ayuda para entender el sistema de tracking de formularios
-    """
+    client_ip = request.client.host if request.client else "Desconocida"
+    
+    raw_body_text = raw_body.decode('utf-8', errors='ignore')
+    
+    try:
+        payload = json.loads(raw_body_text) if raw_body_text.strip() else {}
+    except json.JSONDecodeError:
+        payload = {"raw_text": raw_body_text}
+    
+    # Detectar dirección
+    direction = detect_message_direction(payload)
+    
+    # Obtener contenido
+    content = get_message_content(payload)
+    
+    # Log simple pero claro
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    
+    if direction == "ENTRANTE":
+        logger.info(f"📩 [{timestamp}] MENSAJE ENTRANTE de {client_ip}")
+    elif direction == "SALIENTE":
+        logger.info(f"📤 [{timestamp}] MENSAJE SALIENTE de {client_ip}")
+    else:
+        logger.info(f"❓ [{timestamp}] MENSAJE INDETERMINADO de {client_ip}")
+    
+    if content:
+        content_preview = content[:100] + "..." if len(content) > 100 else content
+        logger.info(f"   💬 {content_preview}")
+    
+    # Info de contacto si existe
+    contact_id = payload.get('contactId') or payload.get('contact_id')
+    contact_phone = payload.get('contactPhone') or payload.get('contact_phone')
+    
+    if contact_id:
+        logger.info(f"   👤 Contact ID: {contact_id}")
+    if contact_phone:
+        logger.info(f"   📞 Teléfono: {contact_phone}")
+    
+    logger.info(f"   📊 Campos recibidos: {len(payload)}")
+    
     return {
-        "system": "Form Response Time Tracker",
-        "purpose": "Track response times from 110-field form submissions",
-        "key_metrics_extracted": [
-            "Tiempo hasta primer mensaje enviado → Response time in minutes",
-            "mensajes salientes → Outbound message count", 
-            "contactId → Contact identification",
-            "contactPhone → Contact phone number"
-        ],
-        "endpoints": {
-            "primary": "POST /webhook/form-submission",
-            "compatibility": "POST /webhook/inbound (legacy)",
-            "dashboard": "GET /webhook/response-times/dashboard",
-            "raw_data": "GET /webhook/response-times/raw-data"
+        "status": "received",
+        "direction": direction,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@router.get("/webhook/messages/history")
+async def get_message_history(limit: int = 20):
+    """
+    Obtiene el histórico de mensajes recibidos
+    """
+    recent_history = message_history[-limit:] if message_history else []
+    
+    stats = {
+        "total_messages_received": len(message_history),
+        "inbound_count": sum(1 for m in message_history if m['direction'] == 'ENTRANTE'),
+        "outbound_count": sum(1 for m in message_history if m['direction'] == 'SALIENTE'),
+        "indeterminate_count": sum(1 for m in message_history if m['direction'] == 'INDETERMINADO')
+    }
+    
+    return {
+        "status": "success",
+        "timestamp": datetime.now().isoformat(),
+        "statistics": stats,
+        "recent_messages": recent_history
+    }
+
+@router.get("/webhook/messages/test")
+async def test_message_endpoint():
+    """
+    Endpoint de prueba para verificar que el sistema funciona
+    """
+    test_examples = {
+        "inbound_example": {
+            "contactId": "TEST123",
+            "contactName": "Juan Pérez",
+            "contactPhone": "+573001234567",
+            "body": "Hola, me interesa información sobre sus servicios",
+            "direction": "inbound",
+            "timestamp": datetime.now().isoformat(),
+            "channel": "whatsapp"
         },
-        "example_analysis": {
-            "input": "Tiempo hasta primer mensaje enviado: '1 hora con 34 minutos'",
-            "output": "94 minutes response time",
-            "performance": "Needs Improvement (target: <15 minutes)"
+        "outbound_example": {
+            "contactId": "TEST456",
+            "contactName": "María García",
+            "contactPhone": "+573009876543",
+            "message": "Gracias por contactarnos, en breve le atenderemos",
+            "type": "outbound_message",
+            "time": datetime.now().isoformat(),
+            "platform": "sms"
+        },
+        "form_example": {
+            "contactId": "SL3Ljfe3CJ90iv7OHWIu",
+            "Tiempo hasta primer mensaje enviado": "1 hora con 34 minutos",
+            "mensajes salientes": 3,
+            "contactPhone": "+573246870911",
+            "Fuente del lead": "Facebook",
+            "Canal": "WhatsApp"
         }
+    }
+    
+    return {
+        "message": "✅ Sistema de mensajes funcionando",
+        "timestamp": datetime.now().isoformat(),
+        "endpoints_available": {
+            "POST /webhook/messages": "Muestra TODA la información detallada",
+            "POST /webhook/messages/simple": "Versión simplificada para logs",
+            "GET /webhook/messages/history": "Histórico de mensajes",
+            "GET /webhook/messages/test": "Esta página de prueba"
+        },
+        "test_payloads": test_examples,
+        "current_stats": {
+            "total_messages_stored": len(message_history),
+            "last_message_time": message_history[-1]['timestamp'] if message_history else "Ninguno"
+        }
+    }
+
+# Endpoint de compatibilidad
+@router.post("/webhook/inbound")
+async def compatibility_endpoint(
+    request: Request,
+    raw_body: bytes = Depends(get_raw_body)
+):
+    """
+    Endpoint de compatibilidad para /webhook/inbound
+    """
+    logger.info("🔄 Usando endpoint de compatibilidad /webhook/inbound")
+    return await receive_all_messages(request, raw_body)
+
+@router.api_route("/webhook/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def catch_all_webhooks(request: Request, path: str):
+    """
+    Captura cualquier webhook que llegue
+    """
+    method = request.method
+    client_ip = request.client.host if request.client else "Desconocida"
+    
+    logger.info(f"🎯 WEBHOOK CAPTURADO: {method} /webhook/{path}")
+    logger.info(f"   🌐 IP: {client_ip}")
+    logger.info(f"   🕒 Hora: {datetime.now().strftime('%H:%M:%S')}")
+    
+    # Solo procesar body para métodos que lo tienen
+    if method in ["POST", "PUT", "PATCH"]:
+        try:
+            raw_body = await request.body()
+            raw_body_text = raw_body.decode('utf-8', errors='ignore')
+            
+            try:
+                payload = json.loads(raw_body_text) if raw_body_text.strip() else {}
+                logger.info(f"   📦 Payload (primeros 200 chars): {raw_body_text[:200]}...")
+            except:
+                logger.info(f"   📦 Body raw: {raw_body_text[:200]}...")
+        except:
+            logger.info("   📦 [No se pudo leer el body]")
+    
+    return {
+        "status": "captured",
+        "message": f"Webhook recibido en /webhook/{path}",
+        "method": method,
+        "timestamp": datetime.now().isoformat(),
+        "recommendation": "Usa POST /webhook/messages para procesamiento de mensajes"
     }
