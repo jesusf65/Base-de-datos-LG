@@ -1,148 +1,317 @@
 from fastapi import Request, HTTPException, APIRouter, Depends
 from fastapi.responses import JSONResponse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+import logging
 import json
 from datetime import datetime
 
+# Configuración de logging simple y limpio
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('raw_webhook_data.log', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger("raw_webhook_tracker")
+
 router = APIRouter()
+
+# Almacenamiento simple
+raw_data_store = []
 
 async def get_raw_body(request: Request):
     return await request.body()
 
-@router.post("/webhook/diagnostic")
-async def diagnostic_webhook(
+@router.post("/webhook/raw")
+async def receive_raw_webhook(
     request: Request,
     raw_body: bytes = Depends(get_raw_body)
 ):
     """
-    Endpoint para diagnosticar EXACTAMENTE qué tipo de payload estás recibiendo
+    Endpoint que muestra TODOS los datos crudos recibidos
     """
-    # Información básica
-    client_ip = request.client.host if request.client else "unknown"
-    timestamp = datetime.now().isoformat()
-    
-    # Leer body
-    raw_body_text = raw_body.decode('utf-8', errors='ignore')
-    
     try:
-        payload = json.loads(raw_body_text) if raw_body_text.strip() else {}
-    except json.JSONDecodeError:
-        payload = {"raw_text": raw_body_text}
-    
-    # Análisis COMPLETO del payload
-    analysis = {
-        "timestamp": timestamp,
-        "client_ip": client_ip,
-        "payload_size_bytes": len(raw_body_text),
-        "total_fields": len(payload) if isinstance(payload, dict) else 0,
-        "is_form_data": len(payload) > 50,  # Los formularios tienen 110+ campos
-        "has_message_fields": any(field in payload for field in ['body', 'message', 'text', 'content']),
-        "has_direction_field": 'direction' in payload or 'type' in payload,
-        "has_contact_fields": any(field in payload for field in ['contactId', 'contact_id', 'contactName', 'contactPhone']),
-        "field_names": list(payload.keys()) if isinstance(payload, dict) else [],
-        "sample_values": {}
-    }
-    
-    # Tomar muestra de algunos valores
-    sample_fields = ['contactId', 'contact_id', 'body', 'message', 'text', 'content', 'direction', 'type', 'timestamp']
-    for field in sample_fields:
-        if field in payload:
-            value = payload[field]
-            analysis["sample_values"][field] = str(value)[:100] + "..." if len(str(value)) > 100 else value
-    
-    # MOSTRAR EN CONSOLA de forma CLARA
-    print("\n" + "🔍" * 30)
-    print("🔍 DIAGNÓSTICO DE WEBHOOK")
-    print("🔍" * 30)
-    print(f"Hora: {datetime.now().strftime('%H:%M:%S')}")
-    print(f"IP Cliente: {client_ip}")
-    print(f"Tamaño payload: {len(raw_body_text)} bytes")
-    print(f"Total campos: {len(payload)}")
-    print("-" * 40)
-    
-    # Detectar tipo
-    if analysis["has_message_fields"] and analysis["has_direction_field"]:
-        print("✅ TIPO: MENSAJE INDIVIDUAL DE CHAT")
-        direction = payload.get('direction') or payload.get('type', 'unknown')
-        content = payload.get('body') or payload.get('message') or payload.get('text') or payload.get('content', '')
-        contact_id = payload.get('contactId') or payload.get('contact_id')
+        # Obtener información básica
+        client_ip = request.client.host if request.client else "unknown"
+        method = request.method
+        url_path = request.url.path
+        headers = dict(request.headers)
+        timestamp = datetime.now().isoformat()
         
-        print(f"📨 Dirección: {direction}")
-        print(f"👤 Contact ID: {contact_id}")
-        print(f"💬 Mensaje: {content[:200]}{'...' if len(content) > 200 else ''}")
+        # Leer body crudo
+        raw_body_text = raw_body.decode('utf-8', errors='ignore')
         
-    elif analysis["is_form_data"]:
-        print("📋 TIPO: FORMULARIO/RESUMEN (110+ campos)")
-        print(f"📊 Campos con datos: {sum(1 for v in payload.values() if v and str(v).strip())}/{len(payload)}")
+        # Intentar parsear como JSON
+        parsed_body = {}
+        try:
+            if raw_body_text.strip():
+                parsed_body = json.loads(raw_body_text)
+        except json.JSONDecodeError:
+            parsed_body = {"raw_text": raw_body_text}
         
-        # Mostrar campos importantes si existen
-        important_fields = {
-            'mensajes salientes': 'Mensajes enviados',
-            'Tiempo hasta primer mensaje enviado': 'Tiempo respuesta',
-            'contact_id': 'Contact ID',
-            'phone': 'Teléfono',
-            'first_name': 'Nombre'
-        }
+        # LOG 1: Encabezado de la petición
+        logger.info("=" * 80)
+        logger.info(f"WEBHOOK RECEIVED - {timestamp}")
+        logger.info(f"Client IP: {client_ip}")
+        logger.info(f"Method: {method}")
+        logger.info(f"Endpoint: {url_path}")
+        logger.info(f"Timestamp: {timestamp}")
+        logger.info("-" * 40)
         
-        for field, label in important_fields.items():
-            if field in payload:
-                print(f"📌 {label}: {payload[field]}")
+        # LOG 2: Headers completos
+        logger.info("HEADERS:")
+        for header, value in headers.items():
+            logger.info(f"  {header}: {value}")
+        logger.info("-" * 40)
+        
+        # LOG 3: Body crudo (texto original)
+        logger.info("RAW BODY (original text):")
+        logger.info(f"  Size: {len(raw_body_text)} bytes")
+        if raw_body_text:
+            # Mostrar el body completo, truncado si es muy largo
+            if len(raw_body_text) > 2000:
+                logger.info(f"  Content (first 2000 chars):")
+                logger.info(raw_body_text[:2000])
+                logger.info(f"  ... [TRUNCATED, total: {len(raw_body_text)} chars]")
+            else:
+                logger.info(f"  Content:")
+                logger.info(raw_body_text)
+        else:
+            logger.info("  [EMPTY BODY]")
+        logger.info("-" * 40)
+        
+        # LOG 4: Body parseado como JSON
+        logger.info("PARSED JSON BODY:")
+        if parsed_body:
+            logger.info(json.dumps(parsed_body, indent=2, ensure_ascii=False))
+        else:
+            logger.info("  [NO JSON CONTENT]")
+        logger.info("-" * 40)
+        
+        # LOG 5: Análisis de campos
+        logger.info("FIELD ANALYSIS:")
+        if parsed_body and isinstance(parsed_body, dict):
+            logger.info(f"  Total fields: {len(parsed_body)}")
+            
+            # Campos comunes a buscar
+            common_fields = {
+                'contact_info': ['contactId', 'contact_id', 'contactName', 'contactPhone', 'contactEmail'],
+                'message_info': ['body', 'message', 'text', 'content', 'direction', 'type'],
+                'timestamps': ['timestamp', 'time', 'createdAt', 'date'],
+                'channel_info': ['channel', 'channelType', 'platform', 'medium', 'source']
+            }
+            
+            for category, fields in common_fields.items():
+                found = []
+                for field in fields:
+                    if field in parsed_body:
+                        value = parsed_body[field]
+                        found.append(f"{field}: {value}")
                 
-    else:
-        print("❓ TIPO: DESCONOCIDO")
-        print(f"Campos encontrados: {', '.join(list(payload.keys())[:10])}")
-        if len(payload) > 10:
-            print(f"... y {len(payload) - 10} más")
-    
-    print("🔍" * 30)
-    
-    return JSONResponse(content={
-        "status": "diagnosed",
-        "analysis": analysis,
-        "detected_type": "chat_message" if analysis["has_message_fields"] else "form_data" if analysis["is_form_data"] else "unknown"
-    }, status_code=200)
-
-@router.get("/webhook/test-chat")
-async def test_chat_message():
-    """
-    Genera ejemplos de cómo DEBERÍAN verse los mensajes de chat reales
-    """
-    examples = {
-        "inbound_example_correct": {
-            "contactId": "TEST123",
-            "contactName": "Juan Pérez",
-            "contactPhone": "+573001234567",
-            "body": "Hola, me interesa información sobre sus servicios",
-            "direction": "inbound",
-            "timestamp": "2025-12-01T16:30:00Z",
-            "channel": "whatsapp",
-            "type": "message"
-        },
-        "outbound_example_correct": {
-            "contactId": "TEST456",
-            "contactName": "María García",
-            "contactPhone": "+573009876543",
-            "message": "Gracias por contactarnos, te ayudo con eso",
-            "direction": "outbound",
-            "timestamp": "2025-12-01T16:31:15Z",
-            "channel": "sms",
-            "type": "message"
-        },
-        "what_you_are_receiving": {
-            "¿tienes contacto directo con dueños o directivos de dealer?": "",
-            "mensajes salientes": 17,
-            "Tiempo hasta primer mensaje enviado": "1 hora con 34 minutos",
-            "GPT - Full Conversation": "",
-            "contact_id": "KKhGeMkoIdMdanhMGNg4",
-            "first_name": "null",
-            "phone": "+15164592134",
-            "total_fields": 110
+                if found:
+                    logger.info(f"  {category}:")
+                    for item in found:
+                        logger.info(f"    {item}")
+                else:
+                    logger.info(f"  {category}: No fields found")
+        else:
+            logger.info("  [NO FIELDS TO ANALYZE]")
+        
+        logger.info("=" * 80)
+        
+        # Almacenar para histórico
+        entry = {
+            "timestamp": timestamp,
+            "client_ip": client_ip,
+            "method": method,
+            "endpoint": url_path,
+            "headers_count": len(headers),
+            "raw_body_size": len(raw_body_text),
+            "parsed_fields_count": len(parsed_body) if isinstance(parsed_body, dict) else 0,
+            "sample_data": {
+                "contact_id": parsed_body.get('contactId') or parsed_body.get('contact_id'),
+                "direction": parsed_body.get('direction') or parsed_body.get('type'),
+                "has_message": any(field in parsed_body for field in ['body', 'message', 'text', 'content'])
+            }
         }
-    }
+        raw_data_store.append(entry)
+        
+        # Mantener solo últimos 1000 registros
+        if len(raw_data_store) > 1000:
+            raw_data_store.pop(0)
+        
+        # Respuesta simple
+        response_data = {
+            "status": "received",
+            "timestamp": timestamp,
+            "processing": {
+                "raw_body_bytes": len(raw_body_text),
+                "headers_count": len(headers),
+                "parsed_fields_count": len(parsed_body) if isinstance(parsed_body, dict) else 0,
+                "client_ip": client_ip
+            },
+            "data_preview": {
+                "contact_id": parsed_body.get('contactId') or parsed_body.get('contact_id'),
+                "direction": parsed_body.get('direction') or parsed_body.get('type'),
+                "message_preview": None
+            }
+        }
+        
+        # Agregar preview del mensaje si existe
+        message_fields = ['body', 'message', 'text', 'content']
+        for field in message_fields:
+            if field in parsed_body and parsed_body[field]:
+                response_data["data_preview"]["message_preview"] = str(parsed_body[field])[:100]
+                break
+        
+        return JSONResponse(content=response_data, status_code=200)
+        
+    except Exception as e:
+        error_time = datetime.now().isoformat()
+        logger.error(f"ERROR PROCESSING WEBHOOK - {error_time}")
+        logger.error(f"Error details: {str(e)}")
+        
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Error processing webhook: {str(e)}"
+        )
+
+@router.get("/webhook/raw/stats")
+async def get_raw_stats():
+    """
+    Obtiene estadísticas de los datos crudos recibidos
+    """
+    if not raw_data_store:
+        return {
+            "status": "no_data",
+            "message": "No webhook data received yet",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    total_requests = len(raw_data_store)
+    methods_count = {}
+    endpoints_count = {}
+    
+    for entry in raw_data_store:
+        method = entry["method"]
+        endpoint = entry["endpoint"]
+        
+        methods_count[method] = methods_count.get(method, 0) + 1
+        endpoints_count[endpoint] = endpoints_count.get(endpoint, 0) + 1
+    
+    # Últimos 5 registros
+    recent_entries = raw_data_store[-5:] if len(raw_data_store) >= 5 else raw_data_store
     
     return {
-        "message": "Ejemplos de estructuras de mensajes",
-        "note": "Compara lo que recibes con estos ejemplos",
-        "examples": examples,
-        "how_to_test": "Envía un mensaje real de chat a POST /webhook/diagnostic"
+        "status": "success",
+        "timestamp": datetime.now().isoformat(),
+        "statistics": {
+            "total_requests_received": total_requests,
+            "methods_distribution": methods_count,
+            "endpoints_distribution": endpoints_count,
+            "avg_body_size": sum(e["raw_body_size"] for e in raw_data_store) // total_requests if total_requests > 0 else 0,
+            "avg_fields_count": sum(e["parsed_fields_count"] for e in raw_data_store) // total_requests if total_requests > 0 else 0
+        },
+        "recent_activity": recent_entries
+    }
+
+@router.post("/webhook/inbound")
+async def compatibility_inbound(
+    request: Request,
+    raw_body: bytes = Depends(get_raw_body)
+):
+    """
+    Endpoint de compatibilidad para /webhook/inbound
+    """
+    # Registrar que se usa el endpoint legacy
+    logger.info("LEGACY ENDPOINT CALLED: /webhook/inbound")
+    logger.info("Redirecting to /webhook/raw for processing")
+    
+    # Procesar igual que /webhook/raw
+    return await receive_raw_webhook(request, raw_body)
+
+@router.api_route("/webhook/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+async def catch_all_webhooks(
+    request: Request,
+    path: str,
+    raw_body: bytes = Depends(get_raw_body)
+):
+    """
+    Captura CUALQUIER webhook que llegue a /webhook/*
+    """
+    # Para métodos sin body, obtener body vacío
+    if request.method in ["GET", "OPTIONS"]:
+        raw_body = b""
+        raw_body_text = ""
+    else:
+        raw_body_text = raw_body.decode('utf-8', errors='ignore')
+    
+    client_ip = request.client.host if request.client else "unknown"
+    method = request.method
+    headers = dict(request.headers)
+    timestamp = datetime.now().isoformat()
+    
+    # Log básico
+    logger.info(f"CATCH-ALL WEBHOOK: {method} /webhook/{path}")
+    logger.info(f"Client IP: {client_ip}")
+    logger.info(f"Timestamp: {timestamp}")
+    logger.info(f"Headers count: {len(headers)}")
+    
+    if raw_body_text:
+        logger.info(f"Body size: {len(raw_body_text)} bytes")
+        if len(raw_body_text) > 500:
+            logger.info(f"Body preview: {raw_body_text[:500]}...")
+        else:
+            logger.info(f"Body content: {raw_body_text}")
+    
+    # Intentar parsear JSON
+    parsed_body = {}
+    if raw_body_text.strip():
+        try:
+            parsed_body = json.loads(raw_body_text)
+        except:
+            parsed_body = {"raw_text": raw_body_text}
+    
+    # Responder
+    return {
+        "status": "received",
+        "message": f"Webhook received at /webhook/{path}",
+        "method": method,
+        "timestamp": timestamp,
+        "client_ip": client_ip,
+        "data_info": {
+            "headers_count": len(headers),
+            "body_size_bytes": len(raw_body_text),
+            "parsed_fields_count": len(parsed_body) if isinstance(parsed_body, dict) else 0,
+            "is_json": isinstance(parsed_body, dict) and parsed_body.get("raw_text") is None
+        }
+    }
+
+@router.get("/")
+async def root():
+    """
+    Página raíz con información simple
+    """
+    return {
+        "service": "Raw Webhook Receiver",
+        "description": "System to capture and display ALL raw webhook data",
+        "timestamp": datetime.now().isoformat(),
+        "endpoints": {
+            "POST /webhook/raw": "Main endpoint to receive webhooks",
+            "POST /webhook/inbound": "Legacy compatibility endpoint",
+            "GET /webhook/raw/stats": "Statistics of received data",
+            "ANY /webhook/{path}": "Catch-all for any webhook path"
+        },
+        "features": {
+            "raw_body_logging": "Shows complete raw body text",
+            "headers_logging": "Shows all headers",
+            "json_parsing": "Attempts to parse JSON bodies",
+            "catch_all": "Captures any endpoint under /webhook/"
+        },
+        "current_stats": {
+            "total_requests": len(raw_data_store),
+            "last_request_time": raw_data_store[-1]["timestamp"] if raw_data_store else "None"
+        }
     }
