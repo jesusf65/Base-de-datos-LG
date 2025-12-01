@@ -50,18 +50,16 @@ def parse_timestamp(ts_value) -> Optional[datetime]:
     if not ts_value:
         return None
     
-    # Si ya es datetime
     if isinstance(ts_value, datetime):
         return ts_value
     
     ts_str = str(ts_value)
     
-    # Formatos comunes
     formats = [
-        "%Y-%m-%dT%H:%M:%S.%fZ",  # 2025-11-29T14:51:57.875Z
+        "%Y-%m-%dT%H:%M:%S.%fZ",
         "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%d %H:%M:%S",
-        "%d/%m/%Y %H:%M",  # 29/11/2025 09:51
+        "%d/%m/%Y %H:%M",
         "%Y-%m-%d",
     ]
     
@@ -86,30 +84,25 @@ def extract_message_info(data: dict) -> dict:
         "raw_data": data
     }
     
-    # Contact ID
     contact_fields = ['contactId', 'contact_id', 'id', 'userId', 'user_id']
     message_info["contact_id"] = search_nested_value(data, contact_fields)
     
-    # Mensaje
     message_fields = ['message', 'body', 'text', 'content', 'messageBody']
     message_info["message"] = search_nested_value(data, message_fields)
     
-    # Timestamp
     timestamp_fields = ['timestamp', 'time', 'createdAt', 'date', 'dateAdded', 'date_created', 
                        'Timestamp Respuesta', 'dateCreated', 'created_at']
     raw_timestamp = search_nested_value(data, timestamp_fields)
     message_info["timestamp"] = raw_timestamp
     message_info["timestamp_parsed"] = parse_timestamp(raw_timestamp)
     
-    # Dirección
     direction_fields = ['direction', 'type', 'messageType', 'messageDirection', 'messageStatus']
     message_info["direction"] = search_nested_value(data, direction_fields)
     
-    # Detectar dirección por patrones
     if not message_info["direction"]:
-        if 'Mensajes del cliente' in data and data['Mensajes del cliente']:
+        if 'Mensajes del cliente' in data:
             message_info["direction"] = "inbound"
-        elif 'mensajes salientes' in data and data['mensajes salientes']:
+        elif 'mensajes salientes' in data:
             message_info["direction"] = "outbound"
         
         if 'customData' in data and isinstance(data['customData'], dict):
@@ -119,7 +112,6 @@ def extract_message_info(data: dict) -> dict:
             elif 'type' in custom:
                 message_info["direction"] = custom['type']
     
-    # Info del contacto
     if 'full_name' in data:
         message_info["contact_name"] = data['full_name']
     elif 'first_name' in data:
@@ -130,9 +122,9 @@ def extract_message_info(data: dict) -> dict:
     
     return message_info
 
-def calculate_response_time(client_msg_time: datetime, vendor_msg_time: datetime) -> dict:
-    """Calcula el tiempo de respuesta y lo formatea"""
-    diff = vendor_msg_time - client_msg_time
+def calculate_response_time(start: datetime, end: datetime) -> dict:
+    """Calcula el tiempo de respuesta usando timestamps reales"""
+    diff = end - start
     total_seconds = diff.total_seconds()
     
     hours = int(total_seconds // 3600)
@@ -159,7 +151,6 @@ async def receive_raw_webhook(
     request: Request,
     raw_body: bytes = Depends(get_raw_body)
 ):
-    """Endpoint que captura mensajes y calcula tiempos de respuesta"""
     try:
         timestamp_received = datetime.now()
         client_ip = request.client.host if request.client else "unknown"
@@ -173,7 +164,6 @@ async def receive_raw_webhook(
         except json.JSONDecodeError:
             parsed_body = {"raw_text": raw_body_text}
         
-        # Extraer información
         msg_info = extract_message_info(parsed_body)
         contact_id = msg_info["contact_id"]
         
@@ -181,7 +171,6 @@ async def receive_raw_webhook(
             logger.warning("⚠️  Mensaje sin contact_id - ignorado")
             return JSONResponse(content={"status": "ignored", "reason": "no_contact_id"})
         
-        # Obtener conversación
         conv = conversations[contact_id]
         if not conv["contact_id"]:
             conv["contact_id"] = contact_id
@@ -190,16 +179,12 @@ async def receive_raw_webhook(
                 "phone": msg_info["phone"]
             }
         
-        # Determinar dirección
-        direction = msg_info["direction"]
-        if not direction or direction == "❓ Desconocido":
-            direction = "unknown"
+        direction = msg_info["direction"] or "unknown"
+        direction_lower = str(direction).lower()
         
-        direction_lower = direction.lower()
-        
-        # Agregar mensaje a la conversación
         message_entry = {
             "timestamp_received": timestamp_received.isoformat(),
+            "timestamp_received_parsed": timestamp_received,
             "timestamp_message": msg_info["timestamp"],
             "timestamp_parsed": msg_info["timestamp_parsed"],
             "direction": direction,
@@ -208,15 +193,15 @@ async def receive_raw_webhook(
         }
         
         conv["messages"].append(message_entry)
-        
-        # ============================================
-        # CALCULAR TIEMPO DE RESPUESTA
-        # ============================================
+
+        # ====================================================================================
+        # ❤ NUEVO MÉTODO REAL DE CÁLCULO DE TIEMPO (CON timestamp_received)
+        # ====================================================================================
         response_time_info = None
         
         if direction_lower == "inbound":
-            # Mensaje del cliente - guardamos para esperar respuesta
             conv["pending_client_message"] = message_entry
+            
             logger.info("=" * 100)
             logger.info(f"📥 MENSAJE INBOUND RECIBIDO - {timestamp_received.isoformat()}")
             logger.info("=" * 100)
@@ -224,68 +209,36 @@ async def receive_raw_webhook(
             logger.info(f"  👤 Nombre: {msg_info['contact_name']}")
             logger.info(f"  📱 Teléfono: {msg_info['phone']}")
             logger.info(f"  💬 Mensaje: {msg_info['message']}")
-            logger.info(f"  🕐 Timestamp: {msg_info['timestamp']}")
             logger.info(f"  ⏳ Esperando respuesta del vendedor...")
             logger.info("=" * 100)
             logger.info("")
-            
+        
         elif direction_lower == "outbound":
-            # Mensaje del vendedor - calcular tiempo si hay mensaje pendiente
             logger.info("=" * 100)
             logger.info(f"📤 MENSAJE OUTBOUND RECIBIDO - {timestamp_received.isoformat()}")
             logger.info("=" * 100)
             logger.info(f"  👤 Contact: {contact_id}")
             logger.info(f"  👤 Nombre: {msg_info['contact_name']}")
             logger.info(f"  💬 Mensaje: {msg_info['message']}")
-            logger.info(f"  🕐 Timestamp: {msg_info['timestamp']}")
             logger.info("")
             
-            # Verificar si hay mensaje pendiente del cliente
             if conv["pending_client_message"]:
                 pending = conv["pending_client_message"]
+
+                # Usar SIEMPRE timestamp_received real
+                client_time = pending["timestamp_received_parsed"]
+                vendor_time = timestamp_received
+
+                response_time_info = calculate_response_time(client_time, vendor_time)
+                message_entry["response_time"] = response_time_info
+                conv["response_times"].append(response_time_info)
                 
-                # Ambos timestamps deben existir
-                if pending["timestamp_parsed"] and msg_info["timestamp_parsed"]:
-                    response_time_info = calculate_response_time(
-                        pending["timestamp_parsed"],
-                        msg_info["timestamp_parsed"]
-                    )
-                    
-                    message_entry["response_time"] = response_time_info
-                    conv["response_times"].append(response_time_info)
-                    
-                    logger.info("⏱️  TIEMPO DE RESPUESTA:")
-                    logger.info(f"  ⏰ Tiempo: {response_time_info['formatted']}")
-                    logger.info(f"  📊 Total segundos: {response_time_info['total_seconds']}")
-                    logger.info("")
-                    logger.info("  📝 Mensaje del cliente:")
-                    logger.info(f"     '{pending['message']}'")
-                    logger.info(f"     🕐 {pending['timestamp_message']}")
-                    logger.info("")
-                    logger.info("  📝 Respuesta del vendedor:")
-                    logger.info(f"     '{msg_info['message']}'")
-                    logger.info(f"     🕐 {msg_info['timestamp']}")
-                    logger.info("")
-                    
-                    # Calcular promedio de esta conversación
-                    if conv["response_times"]:
-                        avg_seconds = sum(rt["total_seconds"] for rt in conv["response_times"]) / len(conv["response_times"])
-                        avg_minutes = int(avg_seconds // 60)
-                        avg_secs = int(avg_seconds % 60)
-                        
-                        logger.info("📈 ESTADÍSTICAS DE ESTA CONVERSACIÓN:")
-                        logger.info(f"  • Total respuestas: {len(conv['response_times'])}")
-                        logger.info(f"  • Tiempo promedio: {avg_minutes}m {avg_secs}s")
-                        logger.info("")
-                else:
-                    logger.info("⚠️  No se pudo calcular tiempo - timestamps incompletos")
-                    logger.info("")
-                
-                # Limpiar mensaje pendiente
-                conv["pending_client_message"] = None
-            else:
-                logger.info("ℹ️  Mensaje outbound sin mensaje inbound previo")
+                logger.info("⏱️  TIEMPO DE RESPUESTA REAL:")
+                logger.info(f"  ⏰ Tiempo: {response_time_info['formatted']}")
+                logger.info(f"  📊 Total segundos: {response_time_info['total_seconds']}")
                 logger.info("")
+                
+                conv["pending_client_message"] = None
             
             logger.info("=" * 100)
             logger.info("")
@@ -309,7 +262,6 @@ async def receive_raw_webhook(
 
 @router.get("/webhook/stats")
 async def get_statistics():
-    """Obtiene estadísticas generales de todas las conversaciones"""
     if not conversations:
         return {
             "status": "no_data",
@@ -318,9 +270,8 @@ async def get_statistics():
     
     total_conversations = len(conversations)
     total_messages = sum(len(conv["messages"]) for conv in conversations.values())
-    total_response_times = sum(len(conv["response_times"]) for conv in conversations.values())
+    total_responses = sum(len(conv["response_times"]) for conv in conversations.values())
     
-    # Calcular tiempo promedio global
     all_response_times = []
     for conv in conversations.values():
         all_response_times.extend(conv["response_times"])
@@ -335,7 +286,6 @@ async def get_statistics():
             "formatted": f"{avg_minutes}m {avg_secs}s"
         }
     
-    # Resumen por conversación
     conversations_summary = []
     for contact_id, conv in conversations.items():
         conv_avg = None
@@ -361,7 +311,7 @@ async def get_statistics():
         "global_stats": {
             "total_conversations": total_conversations,
             "total_messages": total_messages,
-            "total_responses_calculated": total_response_times,
+            "total_responses_calculated": total_responses,
             "average_response_time": global_avg
         },
         "conversations": conversations_summary
@@ -369,7 +319,6 @@ async def get_statistics():
 
 @router.get("/webhook/conversation/{contact_id}")
 async def get_conversation(contact_id: str):
-    """Obtiene el detalle completo de una conversación"""
     if contact_id not in conversations:
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
     
