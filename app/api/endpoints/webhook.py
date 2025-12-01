@@ -19,6 +19,11 @@ logger = logging.getLogger("message_tracker")
 
 router = APIRouter()
 
+# ==========================================================================================
+# NUEVO: Lista global para calcular el tiempo promedio que tarda el CLIENTE en responder
+# ==========================================================================================
+global_client_response_times = []
+
 # Almacenamiento organizado por conversación
 conversations = defaultdict(lambda: {
     "contact_id": None,
@@ -195,7 +200,7 @@ async def receive_raw_webhook(
         conv["messages"].append(message_entry)
 
         # ====================================================================================
-        # ❤ NUEVO MÉTODO REAL DE CÁLCULO DE TIEMPO (CON timestamp_received)
+        # MÉTODO REAL DE CÁLCULO DE TIEMPO (CON timestamp_received)
         # ====================================================================================
         response_time_info = None
         
@@ -205,43 +210,31 @@ async def receive_raw_webhook(
             logger.info("=" * 100)
             logger.info(f"📥 MENSAJE INBOUND RECIBIDO - {timestamp_received.isoformat()}")
             logger.info("=" * 100)
-            logger.info(f"  👤 Contact: {contact_id}")
-            logger.info(f"  👤 Nombre: {msg_info['contact_name']}")
-            logger.info(f"  📱 Teléfono: {msg_info['phone']}")
-            logger.info(f"  💬 Mensaje: {msg_info['message']}")
-            logger.info(f"  ⏳ Esperando respuesta del vendedor...")
-            logger.info("=" * 100)
-            logger.info("")
         
         elif direction_lower == "outbound":
             logger.info("=" * 100)
             logger.info(f"📤 MENSAJE OUTBOUND RECIBIDO - {timestamp_received.isoformat()}")
             logger.info("=" * 100)
-            logger.info(f"  👤 Contact: {contact_id}")
-            logger.info(f"  👤 Nombre: {msg_info['contact_name']}")
-            logger.info(f"  💬 Mensaje: {msg_info['message']}")
-            logger.info("")
             
             if conv["pending_client_message"]:
                 pending = conv["pending_client_message"]
 
-                # Usar SIEMPRE timestamp_received real
                 client_time = pending["timestamp_received_parsed"]
                 vendor_time = timestamp_received
 
                 response_time_info = calculate_response_time(client_time, vendor_time)
                 message_entry["response_time"] = response_time_info
                 conv["response_times"].append(response_time_info)
+
+                # ==================================================================================
+                # NUEVO: Guardar el tiempo en la lista global para calcular el promedio del cliente
+                # ==================================================================================
+                global_client_response_times.append(response_time_info["total_seconds"])
                 
                 logger.info("⏱️  TIEMPO DE RESPUESTA REAL:")
                 logger.info(f"  ⏰ Tiempo: {response_time_info['formatted']}")
-                logger.info(f"  📊 Total segundos: {response_time_info['total_seconds']}")
-                logger.info("")
                 
                 conv["pending_client_message"] = None
-            
-            logger.info("=" * 100)
-            logger.info("")
         
         return JSONResponse(content={
             "status": "received",
@@ -262,11 +255,6 @@ async def receive_raw_webhook(
 
 @router.get("/webhook/stats")
 async def get_statistics():
-    if not conversations:
-        return {
-            "status": "no_data",
-            "message": "No hay conversaciones registradas"
-        }
     
     total_conversations = len(conversations)
     total_messages = sum(len(conv["messages"]) for conv in conversations.values())
@@ -285,7 +273,15 @@ async def get_statistics():
             "total_seconds": avg_seconds,
             "formatted": f"{avg_minutes}m {avg_secs}s"
         }
-    
+
+    # =====================================================================================
+    # NUEVO: Cálculo del tiempo promedio global de respuesta DEL CLIENTE
+    # =====================================================================================
+    avg_client_response = None
+    if global_client_response_times:
+        s = sum(global_client_response_times) / len(global_client_response_times)
+        avg_client_response = f"{int(s // 60)}m {int(s % 60)}s"
+
     conversations_summary = []
     for contact_id, conv in conversations.items():
         conv_avg = None
@@ -312,7 +308,8 @@ async def get_statistics():
             "total_conversations": total_conversations,
             "total_messages": total_messages,
             "total_responses_calculated": total_responses,
-            "average_response_time": global_avg
+            "average_response_time": global_avg,
+            "average_client_reply_time": avg_client_response   # 👈 NUEVO
         },
         "conversations": conversations_summary
     }
@@ -342,7 +339,7 @@ async def root():
     
     return {
         "service": "Message Response Time Tracker",
-        "version": "3.0",
+        "version": "3.1",
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
             "POST /webhook/raw": "Recibe mensajes y calcula tiempos de respuesta",
