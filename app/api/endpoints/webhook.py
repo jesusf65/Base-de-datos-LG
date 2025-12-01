@@ -1,317 +1,358 @@
 from fastapi import Request, HTTPException, APIRouter, Depends
 from fastapi.responses import JSONResponse
-from typing import Dict, Any, Optional
-import logging
+from typing import Dict, Any, List
 import json
 from datetime import datetime
-
-# Configuración de logging simple y limpio
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('raw_webhook_data.log', encoding='utf-8')
-    ]
-)
-logger = logging.getLogger("raw_webhook_tracker")
+import re
 
 router = APIRouter()
 
-# Almacenamiento simple
-raw_data_store = []
+# Almacenar conversaciones reales
+conversation_store = []
 
 async def get_raw_body(request: Request):
     return await request.body()
 
-@router.post("/webhook/raw")
-async def receive_raw_webhook(
+def extract_chat_information(payload: dict) -> Dict[str, Any]:
+    """
+    Extrae SOLO la información de chat del payload
+    """
+    chat_info = {
+        "extracted_at": datetime.now().isoformat(),
+        "contact_info": {},
+        "messages": [],
+        "metadata": {}
+    }
+    
+    # 1. INFORMACIÓN DE CONTACTO (ESENCIAL)
+    contact_id = payload.get('contactId') or payload.get('contact_id')
+    phone = payload.get('contactPhone') or payload.get('contact_phone') or payload.get('phone')
+    name = payload.get('first_name') or payload.get('contactName') or payload.get('full_name')
+    
+    if contact_id:
+        chat_info["contact_info"]["id"] = contact_id
+    if phone:
+        chat_info["contact_info"]["phone"] = phone
+    if name and name != "null":
+        chat_info["contact_info"]["name"] = name
+    
+    # 2. BUSCAR CAMPOS DE MENSAJES (si existen)
+    # Primero buscar en campos directos
+    message_fields = ['body', 'message', 'text', 'content', 'value']
+    for field in message_fields:
+        if field in payload and payload[field] and str(payload[field]).strip():
+            chat_info["messages"].append({
+                "content": str(payload[field]),
+                "field_source": field,
+                "timestamp": datetime.now().isoformat(),
+                "direction": "unknown"
+            })
+            break
+    
+    # 3. BUSCAR EN CAMPOS DE TEXTO LARGO (podría estar en algún campo específico)
+    # Buscar cualquier campo que contenga texto que parezca un mensaje
+    for key, value in payload.items():
+        if isinstance(value, str) and len(value) > 10 and len(value) < 500:
+            # Excluir campos que sabemos que no son mensajes
+            excluded_keywords = ['timestamp', 'id', 'contact', 'phone', 'email', 'date', 'time', 'survey', 'rating', 'score']
+            if not any(excl in key.lower() for excl in excluded_keywords):
+                # Verificar si parece un mensaje de chat
+                if any(word in value.lower() for word in ['hola', 'gracias', 'info', 'precio', 'ayuda', 'duda', 'buenos', 'tardes']):
+                    chat_info["messages"].append({
+                        "content": value,
+                        "field_source": key,
+                        "timestamp": datetime.now().isoformat(),
+                        "direction": "inbound" if any(word in value.lower() for word in ['hola', 'buenos', 'info', 'precio']) else "outbound"
+                    })
+    
+    # 4. INFORMACIÓN DE TIMING (ESENCIAL)
+    timing_info = {}
+    
+    # Primer mensaje
+    if 'Primer mensaje registrado' in payload and payload['Primer mensaje registrado']:
+        timing_info['first_message'] = payload['Primer mensaje registrado']
+    
+    # Respuesta del vendedor
+    if 'Hora respuesta del vendedor' in payload and payload['Hora respuesta del vendedor']:
+        timing_info['seller_response'] = payload['Hora respuesta del vendedor']
+    
+    # Timestamp de respuesta
+    if 'Timestamp Respuesta' in payload and payload['Timestamp Respuesta']:
+        timing_info['response_timestamp'] = payload['Timestamp Respuesta']
+    
+    # Hora de primer mensaje
+    if 'Hora de primer mensaje' in payload and payload['Hora de primer mensaje']:
+        timing_info['first_message_time'] = payload['Hora de primer mensaje']
+    
+    if timing_info:
+        chat_info["metadata"]["timing"] = timing_info
+    
+    # 5. CONTADOR DE MENSAJES
+    if 'mensajes salientes' in payload:
+        chat_info["metadata"]["outbound_count"] = payload['mensajes salientes']
+    
+    # 6. TIEMPO DE RESPUESTA
+    if 'Tiempo hasta primer mensaje enviado' in payload and payload['Tiempo hasta primer mensaje enviado']:
+        chat_info["metadata"]["response_time"] = payload['Tiempo hasta primer mensaje enviado']
+    
+    # 7. FUENTE
+    if 'Fuente del lead' in payload and payload['Fuente del lead']:
+        chat_info["metadata"]["source"] = payload['Fuente del lead']
+    
+    return chat_info
+
+@router.post("/webhook/chat-essential")
+async def receive_chat_essential(
     request: Request,
     raw_body: bytes = Depends(get_raw_body)
 ):
     """
-    Endpoint que muestra TODOS los datos crudos recibidos
+    Muestra SOLO la información ESENCIAL del chat
     """
     try:
-        # Obtener información básica
-        client_ip = request.client.host if request.client else "unknown"
-        method = request.method
-        url_path = request.url.path
-        headers = dict(request.headers)
-        timestamp = datetime.now().isoformat()
-        
-        # Leer body crudo
+        # Leer payload
         raw_body_text = raw_body.decode('utf-8', errors='ignore')
         
-        # Intentar parsear como JSON
-        parsed_body = {}
         try:
-            if raw_body_text.strip():
-                parsed_body = json.loads(raw_body_text)
+            payload = json.loads(raw_body_text) if raw_body_text.strip() else {}
         except json.JSONDecodeError:
-            parsed_body = {"raw_text": raw_body_text}
+            payload = {"raw_text": raw_body_text}
         
-        # LOG 1: Encabezado de la petición
-        logger.info("=" * 80)
-        logger.info(f"WEBHOOK RECEIVED - {timestamp}")
-        logger.info(f"Client IP: {client_ip}")
-        logger.info(f"Method: {method}")
-        logger.info(f"Endpoint: {url_path}")
-        logger.info(f"Timestamp: {timestamp}")
-        logger.info("-" * 40)
+        # Extraer solo información esencial
+        chat_info = extract_chat_information(payload)
         
-        # LOG 2: Headers completos
-        logger.info("HEADERS:")
-        for header, value in headers.items():
-            logger.info(f"  {header}: {value}")
-        logger.info("-" * 40)
+        # MOSTRAR EN FORMATO DE CHAT LIMPIO
+        print("\n" + "═" * 60)
+        print("💬 CHAT ACTIVO")
+        print("═" * 60)
         
-        # LOG 3: Body crudo (texto original)
-        logger.info("RAW BODY (original text):")
-        logger.info(f"  Size: {len(raw_body_text)} bytes")
-        if raw_body_text:
-            # Mostrar el body completo, truncado si es muy largo
-            if len(raw_body_text) > 2000:
-                logger.info(f"  Content (first 2000 chars):")
-                logger.info(raw_body_text[:2000])
-                logger.info(f"  ... [TRUNCATED, total: {len(raw_body_text)} chars]")
-            else:
-                logger.info(f"  Content:")
-                logger.info(raw_body_text)
-        else:
-            logger.info("  [EMPTY BODY]")
-        logger.info("-" * 40)
+        # Información del contacto
+        contact = chat_info["contact_info"]
+        if contact.get("id") or contact.get("name") or contact.get("phone"):
+            print(f"👤 CONTACTO:")
+            if contact.get("name"):
+                print(f"   Nombre: {contact['name']}")
+            if contact.get("phone"):
+                print(f"   Teléfono: {contact['phone']}")
+            if contact.get("id"):
+                print(f"   ID: {contact['id']}")
         
-        # LOG 4: Body parseado como JSON
-        logger.info("PARSED JSON BODY:")
-        if parsed_body:
-            logger.info(json.dumps(parsed_body, indent=2, ensure_ascii=False))
-        else:
-            logger.info("  [NO JSON CONTENT]")
-        logger.info("-" * 40)
-        
-        # LOG 5: Análisis de campos
-        logger.info("FIELD ANALYSIS:")
-        if parsed_body and isinstance(parsed_body, dict):
-            logger.info(f"  Total fields: {len(parsed_body)}")
-            
-            # Campos comunes a buscar
-            common_fields = {
-                'contact_info': ['contactId', 'contact_id', 'contactName', 'contactPhone', 'contactEmail'],
-                'message_info': ['body', 'message', 'text', 'content', 'direction', 'type'],
-                'timestamps': ['timestamp', 'time', 'createdAt', 'date'],
-                'channel_info': ['channel', 'channelType', 'platform', 'medium', 'source']
-            }
-            
-            for category, fields in common_fields.items():
-                found = []
-                for field in fields:
-                    if field in parsed_body:
-                        value = parsed_body[field]
-                        found.append(f"{field}: {value}")
-                
-                if found:
-                    logger.info(f"  {category}:")
-                    for item in found:
-                        logger.info(f"    {item}")
+        # Mostrar mensajes encontrados
+        if chat_info["messages"]:
+            print(f"\n📨 MENSAJES ENCONTRADOS ({len(chat_info['messages'])}):")
+            for i, msg in enumerate(chat_info["messages"], 1):
+                direction = msg.get("direction", "desconocido")
+                if direction == "inbound":
+                    prefix = "📩 [CLIENTE]"
+                elif direction == "outbound":
+                    prefix = "📤 [VENDEDOR]"
                 else:
-                    logger.info(f"  {category}: No fields found")
+                    prefix = "❓ [DESCONOCIDO]"
+                
+                print(f"\n{prefix}")
+                print(f"   {msg['content'][:200]}{'...' if len(msg['content']) > 200 else ''}")
+                print(f"   🕒 {msg['timestamp'][11:19]} | 📍 Campo: {msg['field_source']}")
         else:
-            logger.info("  [NO FIELDS TO ANALYZE]")
+            print("\n⚠️  NO se encontraron mensajes de texto en este payload")
+            print("   (Solo se recibieron datos de formulario/resumen)")
         
-        logger.info("=" * 80)
+        # Mostrar información de timing
+        if chat_info["metadata"].get("timing"):
+            print(f"\n⏰ TIMING:")
+            timing = chat_info["metadata"]["timing"]
+            for key, value in timing.items():
+                if value:
+                    label = key.replace('_', ' ').title()
+                    print(f"   • {label}: {value}")
+        
+        # Mostrar métricas
+        if chat_info["metadata"].get("outbound_count") is not None:
+            print(f"\n📊 MÉTRICAS:")
+            print(f"   • Mensajes enviados: {chat_info['metadata']['outbound_count']}")
+        
+        if chat_info["metadata"].get("response_time"):
+            print(f"   • Tiempo respuesta: {chat_info['metadata']['response_time']}")
+        
+        if chat_info["metadata"].get("source"):
+            print(f"   • Fuente: {chat_info['metadata']['source']}")
+        
+        # Información del payload
+        print(f"\n📦 INFORMACIÓN TÉCNICA:")
+        print(f"   • Campos totales: {len(payload)}")
+        print(f"   • Campos con datos: {sum(1 for v in payload.values() if v and str(v).strip())}")
+        print(f"   • Tamaño: {len(raw_body_text)} bytes")
+        print(f"   • Hora recepción: {datetime.now().strftime('%H:%M:%S')}")
+        
+        print("═" * 60)
         
         # Almacenar para histórico
-        entry = {
-            "timestamp": timestamp,
-            "client_ip": client_ip,
-            "method": method,
-            "endpoint": url_path,
-            "headers_count": len(headers),
-            "raw_body_size": len(raw_body_text),
-            "parsed_fields_count": len(parsed_body) if isinstance(parsed_body, dict) else 0,
-            "sample_data": {
-                "contact_id": parsed_body.get('contactId') or parsed_body.get('contact_id'),
-                "direction": parsed_body.get('direction') or parsed_body.get('type'),
-                "has_message": any(field in parsed_body for field in ['body', 'message', 'text', 'content'])
-            }
-        }
-        raw_data_store.append(entry)
+        conversation_store.append({
+            "timestamp": datetime.now().isoformat(),
+            "contact_id": contact.get("id"),
+            "contact_name": contact.get("name"),
+            "phone": contact.get("phone"),
+            "messages_found": len(chat_info["messages"]),
+            "outbound_count": chat_info["metadata"].get("outbound_count"),
+            "response_time": chat_info["metadata"].get("response_time")
+        })
         
-        # Mantener solo últimos 1000 registros
-        if len(raw_data_store) > 1000:
-            raw_data_store.pop(0)
+        # Limpiar histórico antiguo
+        if len(conversation_store) > 1000:
+            conversation_store.pop(0)
         
-        # Respuesta simple
-        response_data = {
-            "status": "received",
-            "timestamp": timestamp,
-            "processing": {
-                "raw_body_bytes": len(raw_body_text),
-                "headers_count": len(headers),
-                "parsed_fields_count": len(parsed_body) if isinstance(parsed_body, dict) else 0,
-                "client_ip": client_ip
+        # Respuesta
+        return JSONResponse(content={
+            "status": "processed",
+            "chat_info": {
+                "contact": chat_info["contact_info"],
+                "messages_count": len(chat_info["messages"]),
+                "has_timing_info": bool(chat_info["metadata"].get("timing")),
+                "outbound_messages": chat_info["metadata"].get("outbound_count")
             },
-            "data_preview": {
-                "contact_id": parsed_body.get('contactId') or parsed_body.get('contact_id'),
-                "direction": parsed_body.get('direction') or parsed_body.get('type'),
-                "message_preview": None
+            "processing_summary": {
+                "total_fields": len(payload),
+                "essential_fields_extracted": bool(chat_info["contact_info"]) or bool(chat_info["messages"])
             }
-        }
-        
-        # Agregar preview del mensaje si existe
-        message_fields = ['body', 'message', 'text', 'content']
-        for field in message_fields:
-            if field in parsed_body and parsed_body[field]:
-                response_data["data_preview"]["message_preview"] = str(parsed_body[field])[:100]
-                break
-        
-        return JSONResponse(content=response_data, status_code=200)
+        }, status_code=200)
         
     except Exception as e:
-        error_time = datetime.now().isoformat()
-        logger.error(f"ERROR PROCESSING WEBHOOK - {error_time}")
-        logger.error(f"Error details: {str(e)}")
-        
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Error processing webhook: {str(e)}"
-        )
+        print(f"\n❌ ERROR: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
 
-@router.get("/webhook/raw/stats")
-async def get_raw_stats():
+@router.post("/webhook/minimal")
+async def receive_minimal(
+    request: Request,
+    raw_body: bytes = Depends(get_raw_body)
+):
     """
-    Obtiene estadísticas de los datos crudos recibidos
+    Versión MUY mínima - solo lo ABSOLUTAMENTE esencial
     """
-    if not raw_data_store:
-        return {
-            "status": "no_data",
-            "message": "No webhook data received yet",
-            "timestamp": datetime.now().isoformat()
-        }
+    raw_body_text = raw_body.decode('utf-8', errors='ignore')
     
-    total_requests = len(raw_data_store)
-    methods_count = {}
-    endpoints_count = {}
+    try:
+        payload = json.loads(raw_body_text) if raw_body_text.strip() else {}
+    except json.JSONDecodeError:
+        payload = {"raw_text": raw_body_text}
     
-    for entry in raw_data_store:
-        method = entry["method"]
-        endpoint = entry["endpoint"]
-        
-        methods_count[method] = methods_count.get(method, 0) + 1
-        endpoints_count[endpoint] = endpoints_count.get(endpoint, 0) + 1
+    # EXTRAER SOLO LO ESENCIAL
+    essential = {}
     
-    # Últimos 5 registros
-    recent_entries = raw_data_store[-5:] if len(raw_data_store) >= 5 else raw_data_store
+    # 1. Contact ID
+    essential["contact_id"] = payload.get('contactId') or payload.get('contact_id')
+    
+    # 2. Phone
+    essential["phone"] = payload.get('contactPhone') or payload.get('contact_phone') or payload.get('phone')
+    
+    # 3. Name
+    essential["name"] = payload.get('first_name') or payload.get('contactName') or payload.get('full_name')
+    
+    # 4. Outbound messages count
+    essential["outbound_count"] = payload.get('mensajes salientes')
+    
+    # 5. Response time
+    essential["response_time"] = payload.get('Tiempo hasta primer mensaje enviado')
+    
+    # 6. Buscar ALGÚN mensaje de texto
+    message_content = None
+    message_fields = ['body', 'message', 'text', 'content']
+    for field in message_fields:
+        if field in payload and payload[field] and str(payload[field]).strip():
+            message_content = str(payload[field])[:100]
+            break
+    
+    # MOSTRAR SUPER LIMPIO
+    print("\n" + "-" * 40)
+    print(f"🕒 {datetime.now().strftime('%H:%M:%S')}")
+    
+    if essential["contact_id"]:
+        print(f"👤 ID: {essential['contact_id']}")
+    
+    if essential["name"] and essential["name"] != "null":
+        print(f"📛 Nombre: {essential['name']}")
+    
+    if essential["phone"]:
+        print(f"📞 Tel: {essential['phone']}")
+    
+    if essential["outbound_count"] is not None:
+        print(f"📤 Enviados: {essential['outbound_count']}")
+    
+    if essential["response_time"]:
+        print(f"⏱️  Respuesta: {essential['response_time']}")
+    
+    if message_content:
+        print(f"💬 Msg: {message_content}")
+    else:
+        print("💬 [Sin contenido de mensaje]")
+    
+    print("-" * 40)
+    
+    return {"status": "minimal_processed"}
+
+@router.get("/webhook/chat-history")
+async def get_chat_history():
+    """
+    Obtiene historial de conversaciones
+    """
+    # Agrupar por contacto
+    contacts = {}
+    for conv in conversation_store:
+        contact_id = conv.get("contact_id")
+        if contact_id:
+            if contact_id not in contacts:
+                contacts[contact_id] = {
+                    "contact_id": contact_id,
+                    "contact_name": conv.get("contact_name"),
+                    "phone": conv.get("phone"),
+                    "updates": [],
+                    "max_outbound": 0
+                }
+            
+            contacts[contact_id]["updates"].append({
+                "timestamp": conv["timestamp"],
+                "outbound_count": conv.get("outbound_count"),
+                "response_time": conv.get("response_time")
+            })
+            
+            if conv.get("outbound_count", 0) > contacts[contact_id]["max_outbound"]:
+                contacts[contact_id]["max_outbound"] = conv.get("outbound_count", 0)
     
     return {
         "status": "success",
         "timestamp": datetime.now().isoformat(),
-        "statistics": {
-            "total_requests_received": total_requests,
-            "methods_distribution": methods_count,
-            "endpoints_distribution": endpoints_count,
-            "avg_body_size": sum(e["raw_body_size"] for e in raw_data_store) // total_requests if total_requests > 0 else 0,
-            "avg_fields_count": sum(e["parsed_fields_count"] for e in raw_data_store) // total_requests if total_requests > 0 else 0
-        },
-        "recent_activity": recent_entries
+        "total_conversations": len(conversation_store),
+        "unique_contacts": len(contacts),
+        "contacts": list(contacts.values())
     }
 
+# Endpoint de compatibilidad
 @router.post("/webhook/inbound")
 async def compatibility_inbound(
     request: Request,
     raw_body: bytes = Depends(get_raw_body)
 ):
     """
-    Endpoint de compatibilidad para /webhook/inbound
+    Endpoint legacy
     """
-    # Registrar que se usa el endpoint legacy
-    logger.info("LEGACY ENDPOINT CALLED: /webhook/inbound")
-    logger.info("Redirecting to /webhook/raw for processing")
-    
-    # Procesar igual que /webhook/raw
-    return await receive_raw_webhook(request, raw_body)
-
-@router.api_route("/webhook/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
-async def catch_all_webhooks(
-    request: Request,
-    path: str,
-    raw_body: bytes = Depends(get_raw_body)
-):
-    """
-    Captura CUALQUIER webhook que llegue a /webhook/*
-    """
-    # Para métodos sin body, obtener body vacío
-    if request.method in ["GET", "OPTIONS"]:
-        raw_body = b""
-        raw_body_text = ""
-    else:
-        raw_body_text = raw_body.decode('utf-8', errors='ignore')
-    
-    client_ip = request.client.host if request.client else "unknown"
-    method = request.method
-    headers = dict(request.headers)
-    timestamp = datetime.now().isoformat()
-    
-    # Log básico
-    logger.info(f"CATCH-ALL WEBHOOK: {method} /webhook/{path}")
-    logger.info(f"Client IP: {client_ip}")
-    logger.info(f"Timestamp: {timestamp}")
-    logger.info(f"Headers count: {len(headers)}")
-    
-    if raw_body_text:
-        logger.info(f"Body size: {len(raw_body_text)} bytes")
-        if len(raw_body_text) > 500:
-            logger.info(f"Body preview: {raw_body_text[:500]}...")
-        else:
-            logger.info(f"Body content: {raw_body_text}")
-    
-    # Intentar parsear JSON
-    parsed_body = {}
-    if raw_body_text.strip():
-        try:
-            parsed_body = json.loads(raw_body_text)
-        except:
-            parsed_body = {"raw_text": raw_body_text}
-    
-    # Responder
-    return {
-        "status": "received",
-        "message": f"Webhook received at /webhook/{path}",
-        "method": method,
-        "timestamp": timestamp,
-        "client_ip": client_ip,
-        "data_info": {
-            "headers_count": len(headers),
-            "body_size_bytes": len(raw_body_text),
-            "parsed_fields_count": len(parsed_body) if isinstance(parsed_body, dict) else 0,
-            "is_json": isinstance(parsed_body, dict) and parsed_body.get("raw_text") is None
-        }
-    }
+    return await receive_chat_essential(request, raw_body)
 
 @router.get("/")
 async def root():
-    """
-    Página raíz con información simple
-    """
     return {
-        "service": "Raw Webhook Receiver",
-        "description": "System to capture and display ALL raw webhook data",
+        "service": "Chat Essential Tracker",
+        "description": "Muestra SOLO la información esencial de los mensajes",
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
-            "POST /webhook/raw": "Main endpoint to receive webhooks",
-            "POST /webhook/inbound": "Legacy compatibility endpoint",
-            "GET /webhook/raw/stats": "Statistics of received data",
-            "ANY /webhook/{path}": "Catch-all for any webhook path"
+            "POST /webhook/chat-essential": "Información completa pero limpia",
+            "POST /webhook/minimal": "Versión SUPER mínima",
+            "POST /webhook/inbound": "Endpoint legacy",
+            "GET /webhook/chat-history": "Historial de conversaciones"
         },
-        "features": {
-            "raw_body_logging": "Shows complete raw body text",
-            "headers_logging": "Shows all headers",
-            "json_parsing": "Attempts to parse JSON bodies",
-            "catch_all": "Captures any endpoint under /webhook/"
-        },
-        "current_stats": {
-            "total_requests": len(raw_data_store),
-            "last_request_time": raw_data_store[-1]["timestamp"] if raw_data_store else "None"
-        }
+        "what_it_shows": [
+            "Contact ID",
+            "Nombre (si existe)",
+            "Teléfono",
+            "Contador de mensajes enviados",
+            "Tiempo de respuesta",
+            "Cualquier mensaje de texto encontrado"
+        ]
     }
