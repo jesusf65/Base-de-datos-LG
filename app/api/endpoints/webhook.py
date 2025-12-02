@@ -136,6 +136,32 @@ def calculate_response_time(start: datetime, end: datetime) -> dict:
         "seconds": seconds
     }
 
+def calculate_average_time(times_list: list) -> dict:
+    """Calcula el tiempo promedio de una lista de segundos"""
+    if not times_list:
+        return None
+    
+    avg_seconds = sum(times_list) / len(times_list)
+    hours = int(avg_seconds // 3600)
+    minutes = int((avg_seconds % 3600) // 60)
+    seconds = int(avg_seconds % 60)
+    
+    if hours > 0:
+        formatted = f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        formatted = f"{minutes}m {seconds}s"
+    else:
+        formatted = f"{seconds}s"
+    
+    return {
+        "total_seconds": avg_seconds,
+        "formatted": formatted,
+        "hours": hours,
+        "minutes": minutes,
+        "seconds": seconds,
+        "count": len(times_list)
+    }
+
 @router.post("/webhook/raw")
 async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_raw_body)):
     try:
@@ -182,6 +208,8 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
         
         elif direction_lower == "outbound":
             logger.info(f"📤 MENSAJE OUTBOUND recibido: {msg_info['message']}")
+            
+            # Calcular tiempo de respuesta si hay mensaje pendiente
             if conv["pending_client_message"]:
                 pending = conv["pending_client_message"]
                 client_time = pending["timestamp_received_parsed"]
@@ -191,31 +219,46 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 conv["response_times"].append(response_time_info)
                 global_client_response_times.append(response_time_info["total_seconds"])
                 conv["pending_client_message"] = None
+                
+                logger.info(f"⏱️ Tiempo de respuesta individual: {response_time_info['formatted']}")
 
-                # ======== POST AL WORKFLOW DE GHL CON TIEMPO TOTAL =========
-                ghl_webhook_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
-                payload_to_ghl = {
-                    "contact_id": contact_id,
-                    "client_id": parsed_body.get("client_id", "unknown"),
-                    "client_name": parsed_body.get("client_name", "unknown"),
-                    "inbound_message": pending["message"],
-                    "outbound_message": message_entry["message"],
-                    "response_time_formatted": response_time_info["formatted"],
-                    "response_time_seconds": response_time_info["total_seconds"],
-                    "response_time_minutes": response_time_info["minutes"],
-                    "response_time_hours": response_time_info["hours"],
-                    "timestamp": timestamp_received.isoformat()
+            # ======== ENVIAR AL WORKFLOW DE GHL CON TIEMPO PROMEDIO =========
+            # Calcular tiempo promedio global
+            avg_time = calculate_average_time(global_client_response_times)
+            
+            ghl_webhook_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
+            
+            payload_to_ghl = {
+                "contact_id": contact_id,
+                "client_id": parsed_body.get("client_id", "unknown"),
+                "client_name": parsed_body.get("client_name", "unknown"),
+                "outbound_message": message_entry["message"],
+                "timestamp": timestamp_received.isoformat(),
+                "average_response_time": avg_time if avg_time else {
+                    "total_seconds": 0,
+                    "formatted": "N/A",
+                    "count": 0
                 }
-                
-                logger.info(f"📊 Tiempo de respuesta calculado: {response_time_info['formatted']} ({response_time_info['total_seconds']} segundos)")
-                
-                try:
-                    async with httpx.AsyncClient(timeout=10) as client:
-                        ghl_response = await client.post(ghl_webhook_url, json=payload_to_ghl)
-                        logger.info(f"✅ Webhook GHL enviado exitosamente - Status: {ghl_response.status_code}")
-                        logger.info(f"📤 Payload enviado: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
-                except Exception as e:
-                    logger.error(f"❌ Error enviando webhook GHL: {str(e)}")
+            }
+            
+            # Agregar datos del último tiempo de respuesta si existe
+            if response_time_info:
+                payload_to_ghl["last_response_time"] = {
+                    "formatted": response_time_info["formatted"],
+                    "seconds": response_time_info["total_seconds"],
+                    "minutes": response_time_info["minutes"],
+                    "hours": response_time_info["hours"]
+                }
+            
+            logger.info(f"📊 Tiempo promedio global: {avg_time['formatted'] if avg_time else 'N/A'} (basado en {len(global_client_response_times)} respuestas)")
+            
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    ghl_response = await client.post(ghl_webhook_url, json=payload_to_ghl)
+                    logger.info(f"✅ Webhook GHL enviado exitosamente - Status: {ghl_response.status_code}")
+                    logger.info(f"📤 Payload enviado: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
+            except Exception as e:
+                logger.error(f"❌ Error enviando webhook GHL: {str(e)}")
 
         return JSONResponse(content={
             "status": "received",
@@ -224,7 +267,8 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 "contact_id": contact_id,
                 "direction": direction,
                 "message": msg_info["message"],
-                "response_time": response_time_info
+                "response_time": response_time_info,
+                "average_time": calculate_average_time(global_client_response_times)
             }
         })
     except Exception as e:
