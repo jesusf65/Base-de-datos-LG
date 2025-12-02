@@ -1,10 +1,11 @@
 from fastapi import Request, HTTPException, APIRouter, Depends
 from fastapi.responses import JSONResponse
-from typing import Dict, Any, Optional, List
+from typing import Optional
 import logging
 import json
 from datetime import datetime
 from collections import defaultdict
+import httpx
 
 # Configuración de logging
 logging.basicConfig(
@@ -20,7 +21,7 @@ logger = logging.getLogger("message_tracker")
 router = APIRouter()
 
 # ==========================================================================================
-# NUEVO: Lista global para calcular el tiempo promedio que tarda el CLIENTE en responder
+# Lista global para calcular el tiempo promedio que tarda el CLIENTE en responder
 # ==========================================================================================
 global_client_response_times = []
 
@@ -41,25 +42,20 @@ def search_nested_value(data: dict, search_keys: list) -> any:
     for key in search_keys:
         if key in data and data[key]:
             return data[key]
-    
     for key, value in data.items():
         if isinstance(value, dict):
             result = search_nested_value(value, search_keys)
             if result:
                 return result
-    
     return None
 
 def parse_timestamp(ts_value) -> Optional[datetime]:
     """Convierte diferentes formatos de timestamp a datetime"""
     if not ts_value:
         return None
-    
     if isinstance(ts_value, datetime):
         return ts_value
-    
     ts_str = str(ts_value)
-    
     formats = [
         "%Y-%m-%dT%H:%M:%S.%fZ",
         "%Y-%m-%dT%H:%M:%SZ",
@@ -67,13 +63,11 @@ def parse_timestamp(ts_value) -> Optional[datetime]:
         "%d/%m/%Y %H:%M",
         "%Y-%m-%d",
     ]
-    
     for fmt in formats:
         try:
             return datetime.strptime(ts_str, fmt)
         except:
             continue
-    
     return None
 
 def extract_message_info(data: dict) -> dict:
@@ -96,7 +90,7 @@ def extract_message_info(data: dict) -> dict:
     message_info["message"] = search_nested_value(data, message_fields)
     
     timestamp_fields = ['timestamp', 'time', 'createdAt', 'date', 'dateAdded', 'date_created', 
-                       'Timestamp Respuesta', 'dateCreated', 'created_at']
+                        'Timestamp Respuesta', 'dateCreated', 'created_at']
     raw_timestamp = search_nested_value(data, timestamp_fields)
     message_info["timestamp"] = raw_timestamp
     message_info["timestamp_parsed"] = parse_timestamp(raw_timestamp)
@@ -109,7 +103,6 @@ def extract_message_info(data: dict) -> dict:
             message_info["direction"] = "inbound"
         elif 'mensajes salientes' in data:
             message_info["direction"] = "outbound"
-        
         if 'customData' in data and isinstance(data['customData'], dict):
             custom = data['customData']
             if 'direction' in custom:
@@ -131,18 +124,15 @@ def calculate_response_time(start: datetime, end: datetime) -> dict:
     """Calcula el tiempo de respuesta usando timestamps reales"""
     diff = end - start
     total_seconds = diff.total_seconds()
-    
     hours = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
     seconds = int(total_seconds % 60)
-    
     if hours > 0:
         formatted = f"{hours}h {minutes}m {seconds}s"
     elif minutes > 0:
         formatted = f"{minutes}m {seconds}s"
     else:
         formatted = f"{seconds}s"
-    
     return {
         "total_seconds": total_seconds,
         "formatted": formatted,
@@ -158,10 +148,7 @@ async def receive_raw_webhook(
 ):
     try:
         timestamp_received = datetime.now()
-        client_ip = request.client.host if request.client else "unknown"
         raw_body_text = raw_body.decode('utf-8', errors='ignore')
-        
-        # Parsear JSON
         parsed_body = {}
         try:
             if raw_body_text.strip():
@@ -171,7 +158,6 @@ async def receive_raw_webhook(
         
         msg_info = extract_message_info(parsed_body)
         contact_id = msg_info["contact_id"]
-        
         if not contact_id:
             logger.warning("⚠️  Mensaje sin contact_id - ignorado")
             return JSONResponse(content={"status": "ignored", "reason": "no_contact_id"})
@@ -186,7 +172,6 @@ async def receive_raw_webhook(
         
         direction = msg_info["direction"] or "unknown"
         direction_lower = str(direction).lower()
-        
         message_entry = {
             "timestamp_received": timestamp_received.isoformat(),
             "timestamp_received_parsed": timestamp_received,
@@ -196,46 +181,48 @@ async def receive_raw_webhook(
             "message": msg_info["message"],
             "response_time": None
         }
-        
         conv["messages"].append(message_entry)
 
-        # ====================================================================================
-        # MÉTODO REAL DE CÁLCULO DE TIEMPO (CON timestamp_received)
-        # ====================================================================================
         response_time_info = None
         
         if direction_lower == "inbound":
             conv["pending_client_message"] = message_entry
-            
-            logger.info("=" * 100)
             logger.info(f"📥 MENSAJE INBOUND RECIBIDO - {timestamp_received.isoformat()}")
-            logger.info("=" * 100)
         
         elif direction_lower == "outbound":
-            logger.info("=" * 100)
             logger.info(f"📤 MENSAJE OUTBOUND RECIBIDO - {timestamp_received.isoformat()}")
-            logger.info("=" * 100)
-            
             if conv["pending_client_message"]:
                 pending = conv["pending_client_message"]
-
                 client_time = pending["timestamp_received_parsed"]
                 vendor_time = timestamp_received
-
                 response_time_info = calculate_response_time(client_time, vendor_time)
                 message_entry["response_time"] = response_time_info
                 conv["response_times"].append(response_time_info)
-
-                # ==================================================================================
-                # NUEVO: Guardar el tiempo en la lista global para calcular el promedio del cliente
-                # ==================================================================================
                 global_client_response_times.append(response_time_info["total_seconds"])
-                
-                logger.info("⏱️  TIEMPO DE RESPUESTA REAL:")
-                logger.info(f"  ⏰ Tiempo: {response_time_info['formatted']}")
-                
                 conv["pending_client_message"] = None
-        
+
+                # ============================================================
+                #  🔥 ENVIAR TIEMPO DE RESPUESTA AL WORKFLOW DE GHL
+                # ============================================================
+                try:
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        webhook_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
+                        payload = {
+                            "contact_id": contact_id,
+                            "response_time_formatted": response_time_info["formatted"],
+                            "response_time_seconds": response_time_info["total_seconds"],
+                            "timestamp": datetime.now().isoformat(),
+                            "last_inbound": pending["message"],
+                            "last_outbound": message_entry["message"],
+                        }
+                        ghl_response = await client.post(webhook_url, json=payload)
+                        if ghl_response.status_code >= 300:
+                            logger.error(f"❌ Error enviando webhook a workflow GHL: {ghl_response.text}")
+                        else:
+                            logger.info(f"✅ Webhook enviado al workflow GHL para contact_id={contact_id}")
+                except Exception as e:
+                    logger.error(f"🔥 ERROR enviando webhook a workflow GHL: {str(e)}")
+
         return JSONResponse(content={
             "status": "received",
             "timestamp": timestamp_received.isoformat(),
@@ -255,7 +242,6 @@ async def receive_raw_webhook(
 
 @router.get("/webhook/stats")
 async def get_statistics():
-    
     total_conversations = len(conversations)
     total_messages = sum(len(conv["messages"]) for conv in conversations.values())
     total_responses = sum(len(conv["response_times"]) for conv in conversations.values())
@@ -274,9 +260,6 @@ async def get_statistics():
             "formatted": f"{avg_minutes}m {avg_secs}s"
         }
 
-    # =====================================================================================
-    # NUEVO: Cálculo del tiempo promedio global de respuesta DEL CLIENTE
-    # =====================================================================================
     avg_client_response = None
     if global_client_response_times:
         s = sum(global_client_response_times) / len(global_client_response_times)
@@ -309,7 +292,7 @@ async def get_statistics():
             "total_messages": total_messages,
             "total_responses_calculated": total_responses,
             "average_response_time": global_avg,
-            "average_client_reply_time": avg_client_response   # 👈 NUEVO
+            "average_client_reply_time": avg_client_response
         },
         "conversations": conversations_summary
     }
@@ -318,9 +301,7 @@ async def get_statistics():
 async def get_conversation(contact_id: str):
     if contact_id not in conversations:
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
-    
     conv = conversations[contact_id]
-    
     return {
         "status": "success",
         "contact_id": contact_id,
@@ -336,10 +317,9 @@ async def get_conversation(contact_id: str):
 async def root():
     total_convs = len(conversations)
     total_msgs = sum(len(conv["messages"]) for conv in conversations.values())
-    
     return {
         "service": "Message Response Time Tracker",
-        "version": "3.1",
+        "version": "3.2",
         "timestamp": datetime.now().isoformat(),
         "endpoints": {
             "POST /webhook/raw": "Recibe mensajes y calcula tiempos de respuesta",
