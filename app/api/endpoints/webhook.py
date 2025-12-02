@@ -20,11 +20,16 @@ logger = logging.getLogger("message_tracker")
 
 router = APIRouter()
 
-# Variables globales para medir cuánto tarda el CLIENTE en responder al USUARIO
+# ⚙️ CONFIGURACIÓN: Tiempo máximo permitido (en minutos)
+# Solo se enviarán al webhook las respuestas que estén dentro de este tiempo
+# Ejemplos: 30 (media hora), 60 (1 hora), 120 (2 horas), 300 (5 horas)
+TIEMPO_MAXIMO_MINUTOS = 1
+
+# Variables globales para medir cuánto tarda el VENDEDOR en responder al CLIENTE
 global_total_seconds = 0.0
 global_response_count = 0
 
-# Promedio por cliente
+# Promedio por vendedor/cliente
 client_stats = defaultdict(lambda: {
     "total_seconds": 0.0,
     "response_count": 0
@@ -36,7 +41,7 @@ conversations = defaultdict(lambda: {
     "contact_info": {},
     "messages": [],
     "response_times": [],
-    "pending_user_message": None  # Ahora esperamos respuesta del CLIENTE
+    "pending_client_message": None  # Mensaje del cliente esperando respuesta del vendedor
 })
 
 async def get_raw_body(request: Request):
@@ -217,26 +222,44 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
         conv["messages"].append(message_entry)
         response_time_info = None
 
-        # OUTBOUND = Usuario envía mensaje al cliente
-        if direction_lower == "outbound":
-            conv["pending_user_message"] = message_entry
-            logger.info(f"📤 MENSAJE OUTBOUND enviado (usuario → cliente): {msg_info['message']}")
-            logger.info(f"⏳ Esperando respuesta del cliente...")
+        # INBOUND = Cliente envía mensaje al vendedor
+        if direction_lower == "inbound":
+            conv["pending_client_message"] = message_entry
+            logger.info(f"📥 MENSAJE INBOUND recibido (cliente → vendedor): {msg_info['message']}")
+            logger.info(f"⏳ Esperando respuesta del vendedor...")
         
-        # INBOUND = Cliente responde al usuario
-        elif direction_lower == "inbound":
-            logger.info(f"📥 MENSAJE INBOUND recibido (cliente → usuario): {msg_info['message']}")
+        # OUTBOUND = Vendedor responde al cliente
+        elif direction_lower == "outbound":
+            logger.info(f"📤 MENSAJE OUTBOUND enviado (vendedor → cliente): {msg_info['message']}")
             
-            # Si hay un mensaje pendiente del usuario, calculamos cuánto tardó el cliente en responder
-            if conv["pending_user_message"]:
-                pending = conv["pending_user_message"]
-                user_time = pending["timestamp_received_parsed"]  # Cuando el usuario envió
-                client_time = timestamp_received  # Cuando el cliente respondió
-                response_time_info = calculate_response_time(user_time, client_time)
+            # Si hay un mensaje pendiente del cliente, calculamos cuánto tardó el vendedor en responder
+            if conv["pending_client_message"]:
+                pending = conv["pending_client_message"]
+                client_time = pending["timestamp_received_parsed"]  # Cuando el cliente envió
+                vendor_time = timestamp_received  # Cuando el vendedor respondió
+                response_time_info = calculate_response_time(client_time, vendor_time)
+                
+                # 🔍 FILTRO: Verificar si el tiempo de respuesta está dentro del límite permitido
+                tiempo_respuesta_minutos = response_time_info["total_seconds"] / 60
+                
+                if tiempo_respuesta_minutos > TIEMPO_MAXIMO_MINUTOS:
+                    logger.warning(f"⚠️ RESPUESTA DESCARTADA: {response_time_info['formatted']} ({tiempo_respuesta_minutos:.1f} min) excede el límite de {TIEMPO_MAXIMO_MINUTOS} minutos")
+                    conv["pending_client_message"] = None  # Limpiar mensaje pendiente
+                    
+                    return JSONResponse(content={
+                        "status": "ignored",
+                        "reason": "response_time_exceeded",
+                        "response_time_minutes": tiempo_respuesta_minutos,
+                        "max_allowed_minutes": TIEMPO_MAXIMO_MINUTOS,
+                        "message": f"Tiempo de respuesta {response_time_info['formatted']} excede el límite de {TIEMPO_MAXIMO_MINUTOS} minutos"
+                    })
+                
+                # ✅ El tiempo está dentro del límite, continuar normalmente
+                logger.info(f"✅ Tiempo de respuesta válido: {response_time_info['formatted']} ({tiempo_respuesta_minutos:.1f} min)")
                 
                 message_entry["response_time"] = response_time_info
                 conv["response_times"].append(response_time_info)
-                conv["pending_user_message"] = None
+                conv["pending_client_message"] = None
                 
                 # Extraer client_id
                 client_id = parsed_body.get("client_id") or parsed_body.get("clientId") or "unknown"
@@ -252,7 +275,7 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 # 2️⃣ PROMEDIO DE ESTA CONVERSACIÓN (solo este contact_id)
                 avg_conversation = calculate_conversation_average(conv["response_times"])
                 
-                # 3️⃣ PROMEDIO POR CLIENTE (todos los chats de este client_id)
+                # 3️⃣ PROMEDIO POR VENDEDOR/CLIENTE (todos los chats de este client_id)
                 client_stats[client_id]["total_seconds"] += response_time_info["total_seconds"]
                 client_stats[client_id]["response_count"] += 1
                 avg_client = calculate_average(
@@ -261,10 +284,10 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 )
                 
                 # LOGS DETALLADOS
-                logger.info(f"⏱️ El CLIENTE tardó en responder: {response_time_info['formatted']}")
+                logger.info(f"⏱️ El VENDEDOR tardó en responder: {response_time_info['formatted']}")
                 logger.info(f"📊 PROMEDIO GLOBAL (todos los chats): {avg_global['formatted'] if avg_global else 'N/A'}")
                 logger.info(f"💬 PROMEDIO DE ESTA CONVERSACIÓN: {avg_conversation['formatted'] if avg_conversation else 'N/A'}")
-                logger.info(f"👤 PROMEDIO DEL CLIENTE {client_id}: {avg_client['formatted'] if avg_client else 'N/A'}")
+                logger.info(f"👤 PROMEDIO DEL VENDEDOR {client_id}: {avg_client['formatted'] if avg_client else 'N/A'}")
                 
                 # Enviar payload al webhook de GHL
                 ghl_webhook_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
@@ -273,27 +296,27 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                     "contact_id": str(contact_id),
                     "client_id": str(client_id),
                     "client_name": str(client_name),
-                    "inbound_message": str(message_entry["message"]) if message_entry["message"] else "",
+                    "outbound_message": str(message_entry["message"]) if message_entry["message"] else "",
                     "timestamp": timestamp_received.isoformat(),
                     
-                    # Tiempo actual que tardó el cliente en responder
-                    "current_client_response_time_seconds": float(response_time_info["total_seconds"]),
-                    "current_client_response_time_formatted": str(response_time_info["formatted"]),
+                    # ⭐ TIEMPO DE ESTA RESPUESTA ESPECÍFICA (en segundos)
+                    "response_time_seconds": float(response_time_info["total_seconds"]),
+                    "response_time_formatted": str(response_time_info["formatted"]),
+                    
+                    # ⭐ PROMEDIO SOLO DE ESTA CONVERSACIÓN (en segundos)
+                    "conversation_average_seconds": float(avg_conversation["total_seconds"]) if avg_conversation else 0.0,
+                    "conversation_average_formatted": str(avg_conversation["formatted"]) if avg_conversation else "N/A",
+                    "conversation_total_responses": len(conv["response_times"]),
                     
                     # PROMEDIO GLOBAL (todos los chats juntos)
                     "global_average_seconds": float(avg_global["total_seconds"]) if avg_global else 0.0,
                     "global_average_formatted": str(avg_global["formatted"]) if avg_global else "N/A",
                     "global_total_responses": global_response_count,
                     
-                    # PROMEDIO DE ESTA CONVERSACIÓN (solo este chat)
-                    "conversation_average_seconds": float(avg_conversation["total_seconds"]) if avg_conversation else 0.0,
-                    "conversation_average_formatted": str(avg_conversation["formatted"]) if avg_conversation else "N/A",
-                    "conversation_total_responses": len(conv["response_times"]),
-                    
-                    # PROMEDIO DEL CLIENTE (todos los chats de este client_id)
-                    "client_average_seconds": float(avg_client["total_seconds"]) if avg_client else 0.0,
-                    "client_average_formatted": str(avg_client["formatted"]) if avg_client else "N/A",
-                    "client_total_responses": client_stats[client_id]["response_count"]
+                    # PROMEDIO DEL VENDEDOR (todos los chats de este vendedor/client_id)
+                    "vendor_average_seconds": float(avg_client["total_seconds"]) if avg_client else 0.0,
+                    "vendor_average_formatted": str(avg_client["formatted"]) if avg_client else "N/A",
+                    "vendor_total_responses": client_stats[client_id]["response_count"]
                 }
                 
                 logger.info(f"📤 PAYLOAD A ENVIAR: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
@@ -306,7 +329,7 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 except Exception as e:
                     logger.error(f"❌ Error enviando webhook GHL: {str(e)}")
             else:
-                logger.info(f"ℹ️ Cliente envió mensaje sin haber un outbound previo pendiente")
+                logger.info(f"ℹ️ Vendedor envió mensaje sin haber un inbound previo pendiente")
         
         return JSONResponse(content={
             "status": "received",
@@ -315,11 +338,11 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 "contact_id": contact_id,
                 "direction": direction,
                 "message": msg_info["message"],
-                "client_response_time": response_time_info,
+                "vendor_response_time": response_time_info,
                 "averages": {
                     "global": calculate_average(global_total_seconds, global_response_count),
                     "conversation": calculate_conversation_average(conv["response_times"]) if conv["response_times"] else None,
-                    "client": calculate_average(
+                    "vendor": calculate_average(
                         client_stats[parsed_body.get("client_id", "unknown")]["total_seconds"],
                         client_stats[parsed_body.get("client_id", "unknown")]["response_count"]
                     ) if parsed_body.get("client_id") else None
