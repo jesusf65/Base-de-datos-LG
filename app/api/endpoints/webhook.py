@@ -222,12 +222,9 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 
                 logger.info(f"⏱️ Tiempo de respuesta individual: {response_time_info['formatted']}")
 
-            # ======== ENVIAR AL WORKFLOW DE GHL CON TIEMPO PROMEDIO GLOBAL =========
-            # Calcular tiempo promedio de TODAS las respuestas acumuladas
+            # ======== ENVIAR AL WORKFLOW DE GHL CON TIEMPO PROMEDIO =========
+            # Calcular tiempo promedio global
             avg_time = calculate_average_time(global_client_response_times)
-            
-            # Calcular tiempo total acumulado
-            total_accumulated_seconds = sum(global_client_response_times) if global_client_response_times else 0
             
             ghl_webhook_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
             
@@ -237,32 +234,29 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 "client_name": parsed_body.get("client_name", "unknown"),
                 "outbound_message": message_entry["message"],
                 "timestamp": timestamp_received.isoformat(),
-                # Tiempo promedio global (lo que generalmente tardas en responder)
-                "average_response_time_seconds": avg_time["total_seconds"] if avg_time else 0,
-                "average_response_time_formatted": avg_time["formatted"] if avg_time else "N/A",
-                "average_response_time_minutes": avg_time["minutes"] if avg_time else 0,
-                "average_response_time_hours": avg_time["hours"] if avg_time else 0,
-                # Datos adicionales
-                "total_responses_counted": len(global_client_response_times),
-                "total_accumulated_time_seconds": total_accumulated_seconds
+                "average_response_time": avg_time if avg_time else {
+                    "total_seconds": 0,
+                    "formatted": "N/A",
+                    "count": 0
+                }
             }
             
-            # Agregar datos del tiempo de respuesta actual si existe
+            # Agregar datos del último tiempo de respuesta si existe
             if response_time_info:
-                payload_to_ghl["current_response_time_seconds"] = response_time_info["total_seconds"]
-                payload_to_ghl["current_response_time_formatted"] = response_time_info["formatted"]
-                payload_to_ghl["current_response_time_minutes"] = response_time_info["minutes"]
-                payload_to_ghl["current_response_time_hours"] = response_time_info["hours"]
+                payload_to_ghl["last_response_time"] = {
+                    "formatted": response_time_info["formatted"],
+                    "seconds": response_time_info["total_seconds"],
+                    "minutes": response_time_info["minutes"],
+                    "hours": response_time_info["hours"]
+                }
             
-            logger.info(f"📊 TIEMPO PROMEDIO GLOBAL: {avg_time['formatted'] if avg_time else 'N/A'}")
-            logger.info(f"📈 Basado en {len(global_client_response_times)} respuestas acumuladas")
-            logger.info(f"⏱️ Tiempo total acumulado: {total_accumulated_seconds:.2f} segundos")
+            logger.info(f"📊 Tiempo promedio global: {avg_time['formatted'] if avg_time else 'N/A'} (basado en {len(global_client_response_times)} respuestas)")
             
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
                     ghl_response = await client.post(ghl_webhook_url, json=payload_to_ghl)
                     logger.info(f"✅ Webhook GHL enviado exitosamente - Status: {ghl_response.status_code}")
-                    logger.info(f"📤 Payload enviado al CRM con tiempo promedio global")
+                    logger.info(f"📤 Payload enviado: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
             except Exception as e:
                 logger.error(f"❌ Error enviando webhook GHL: {str(e)}")
 
