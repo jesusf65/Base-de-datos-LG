@@ -192,7 +192,7 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 global_client_response_times.append(response_time_info["total_seconds"])
                 conv["pending_client_message"] = None
 
-                # ======== POST AL WORKFLOW DE GHL =========
+                # ======== POST AL WORKFLOW DE GHL CON TIEMPO TOTAL =========
                 ghl_webhook_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
                 payload_to_ghl = {
                     "contact_id": contact_id,
@@ -202,12 +202,18 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                     "outbound_message": message_entry["message"],
                     "response_time_formatted": response_time_info["formatted"],
                     "response_time_seconds": response_time_info["total_seconds"],
+                    "response_time_minutes": response_time_info["minutes"],
+                    "response_time_hours": response_time_info["hours"],
                     "timestamp": timestamp_received.isoformat()
                 }
+                
+                logger.info(f"📊 Tiempo de respuesta calculado: {response_time_info['formatted']} ({response_time_info['total_seconds']} segundos)")
+                
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
                         ghl_response = await client.post(ghl_webhook_url, json=payload_to_ghl)
-                        logger.info(f"✅ Webhook GHL enviado, status={ghl_response.status_code}")
+                        logger.info(f"✅ Webhook GHL enviado exitosamente - Status: {ghl_response.status_code}")
+                        logger.info(f"📤 Payload enviado: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
                 except Exception as e:
                     logger.error(f"❌ Error enviando webhook GHL: {str(e)}")
 
