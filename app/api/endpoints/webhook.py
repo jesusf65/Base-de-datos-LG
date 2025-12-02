@@ -20,8 +20,15 @@ logger = logging.getLogger("message_tracker")
 
 router = APIRouter()
 
-# Lista global para calcular el tiempo promedio que tarda el CLIENTE en responder
-global_client_response_times = []
+# Variables globales para medir cuánto tarda el CLIENTE en responder al USUARIO
+global_total_seconds = 0.0
+global_response_count = 0
+
+# Promedio por cliente
+client_stats = defaultdict(lambda: {
+    "total_seconds": 0.0,
+    "response_count": 0
+})
 
 # Almacenamiento organizado por conversación
 conversations = defaultdict(lambda: {
@@ -29,7 +36,7 @@ conversations = defaultdict(lambda: {
     "contact_info": {},
     "messages": [],
     "response_times": [],
-    "pending_client_message": None
+    "pending_user_message": None  # Ahora esperamos respuesta del CLIENTE
 })
 
 async def get_raw_body(request: Request):
@@ -134,31 +141,43 @@ def calculate_response_time(start: datetime, end: datetime) -> dict:
         "seconds": seconds
     }
 
-def calculate_average_time(times_list: list) -> Optional[dict]:
-    """Calcula el tiempo promedio de una lista de segundos"""
-    if not times_list:
+def calculate_average(total_seconds: float, count: int) -> Optional[dict]:
+    """Calcula el promedio: suma_total / cantidad"""
+    if count == 0:
         return None
-    avg_seconds = sum(times_list) / len(times_list)
+    
+    avg_seconds = total_seconds / count
     hours = int(avg_seconds // 3600)
     minutes = int((avg_seconds % 3600) // 60)
     seconds = int(avg_seconds % 60)
+    
     if hours > 0:
         formatted = f"{hours}h {minutes}m {seconds}s"
     elif minutes > 0:
         formatted = f"{minutes}m {seconds}s"
     else:
         formatted = f"{seconds}s"
+    
     return {
         "total_seconds": avg_seconds,
         "formatted": formatted,
         "hours": hours,
         "minutes": minutes,
         "seconds": seconds,
-        "count": len(times_list)
+        "count": count
     }
+
+def calculate_conversation_average(response_times: list) -> Optional[dict]:
+    """Calcula el promedio de UNA conversación específica"""
+    if not response_times:
+        return None
+    total = sum(rt["total_seconds"] for rt in response_times)
+    return calculate_average(total, len(response_times))
 
 @router.post("/webhook/raw")
 async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_raw_body)):
+    global global_total_seconds, global_response_count
+    
     try:
         timestamp_received = datetime.now()
         raw_body_text = raw_body.decode('utf-8', errors='ignore')
@@ -198,32 +217,54 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
         conv["messages"].append(message_entry)
         response_time_info = None
 
-        if direction_lower == "inbound":
-            conv["pending_client_message"] = message_entry
-            logger.info(f"📥 MENSAJE INBOUND recibido: {msg_info['message']}")
+        # OUTBOUND = Usuario envía mensaje al cliente
+        if direction_lower == "outbound":
+            conv["pending_user_message"] = message_entry
+            logger.info(f"📤 MENSAJE OUTBOUND enviado (usuario → cliente): {msg_info['message']}")
+            logger.info(f"⏳ Esperando respuesta del cliente...")
         
-        elif direction_lower == "outbound":
-            logger.info(f"📤 MENSAJE OUTBOUND recibido: {msg_info['message']}")
+        # INBOUND = Cliente responde al usuario
+        elif direction_lower == "inbound":
+            logger.info(f"📥 MENSAJE INBOUND recibido (cliente → usuario): {msg_info['message']}")
             
-            if conv["pending_client_message"]:
-                pending = conv["pending_client_message"]
-                client_time = pending["timestamp_received_parsed"]
-                vendor_time = timestamp_received
-                response_time_info = calculate_response_time(client_time, vendor_time)
+            # Si hay un mensaje pendiente del usuario, calculamos cuánto tardó el cliente en responder
+            if conv["pending_user_message"]:
+                pending = conv["pending_user_message"]
+                user_time = pending["timestamp_received_parsed"]  # Cuando el usuario envió
+                client_time = timestamp_received  # Cuando el cliente respondió
+                response_time_info = calculate_response_time(user_time, client_time)
                 
                 message_entry["response_time"] = response_time_info
                 conv["response_times"].append(response_time_info)
-                global_client_response_times.append(response_time_info["total_seconds"])
-                conv["pending_client_message"] = None
+                conv["pending_user_message"] = None
                 
-                logger.info(f"⏱️ Tiempo de respuesta individual: {response_time_info['formatted']}")
-                
-                # Calcular promedio global actualizado
-                avg_time = calculate_average_time(global_client_response_times)
-                
-                # Extraer client_id y client_name
+                # Extraer client_id
                 client_id = parsed_body.get("client_id") or parsed_body.get("clientId") or "unknown"
                 client_name = parsed_body.get("client_name") or parsed_body.get("clientName") or msg_info.get("contact_name") or "unknown"
+                
+                # ACTUALIZAR LOS 3 PROMEDIOS:
+                
+                # 1️⃣ PROMEDIO GLOBAL (todos los chats)
+                global_total_seconds += response_time_info["total_seconds"]
+                global_response_count += 1
+                avg_global = calculate_average(global_total_seconds, global_response_count)
+                
+                # 2️⃣ PROMEDIO DE ESTA CONVERSACIÓN (solo este contact_id)
+                avg_conversation = calculate_conversation_average(conv["response_times"])
+                
+                # 3️⃣ PROMEDIO POR CLIENTE (todos los chats de este client_id)
+                client_stats[client_id]["total_seconds"] += response_time_info["total_seconds"]
+                client_stats[client_id]["response_count"] += 1
+                avg_client = calculate_average(
+                    client_stats[client_id]["total_seconds"],
+                    client_stats[client_id]["response_count"]
+                )
+                
+                # LOGS DETALLADOS
+                logger.info(f"⏱️ El CLIENTE tardó en responder: {response_time_info['formatted']}")
+                logger.info(f"📊 PROMEDIO GLOBAL (todos los chats): {avg_global['formatted'] if avg_global else 'N/A'}")
+                logger.info(f"💬 PROMEDIO DE ESTA CONVERSACIÓN: {avg_conversation['formatted'] if avg_conversation else 'N/A'}")
+                logger.info(f"👤 PROMEDIO DEL CLIENTE {client_id}: {avg_client['formatted'] if avg_client else 'N/A'}")
                 
                 # Enviar payload al webhook de GHL
                 ghl_webhook_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
@@ -232,13 +273,27 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                     "contact_id": str(contact_id),
                     "client_id": str(client_id),
                     "client_name": str(client_name),
-                    "outbound_message": str(message_entry["message"]) if message_entry["message"] else "",
+                    "inbound_message": str(message_entry["message"]) if message_entry["message"] else "",
                     "timestamp": timestamp_received.isoformat(),
-                    "current_response_time_seconds": float(response_time_info["total_seconds"]),
-                    "current_response_time_formatted": str(response_time_info["formatted"]),
-                    "average_response_time_seconds": float(avg_time["total_seconds"]) if avg_time else 0.0,
-                    "average_response_time_formatted": str(avg_time["formatted"]) if avg_time else "N/A",
-                    "total_responses_counted": len(global_client_response_times)
+                    
+                    # Tiempo actual que tardó el cliente en responder
+                    "current_client_response_time_seconds": float(response_time_info["total_seconds"]),
+                    "current_client_response_time_formatted": str(response_time_info["formatted"]),
+                    
+                    # PROMEDIO GLOBAL (todos los chats juntos)
+                    "global_average_seconds": float(avg_global["total_seconds"]) if avg_global else 0.0,
+                    "global_average_formatted": str(avg_global["formatted"]) if avg_global else "N/A",
+                    "global_total_responses": global_response_count,
+                    
+                    # PROMEDIO DE ESTA CONVERSACIÓN (solo este chat)
+                    "conversation_average_seconds": float(avg_conversation["total_seconds"]) if avg_conversation else 0.0,
+                    "conversation_average_formatted": str(avg_conversation["formatted"]) if avg_conversation else "N/A",
+                    "conversation_total_responses": len(conv["response_times"]),
+                    
+                    # PROMEDIO DEL CLIENTE (todos los chats de este client_id)
+                    "client_average_seconds": float(avg_client["total_seconds"]) if avg_client else 0.0,
+                    "client_average_formatted": str(avg_client["formatted"]) if avg_client else "N/A",
+                    "client_total_responses": client_stats[client_id]["response_count"]
                 }
                 
                 logger.info(f"📤 PAYLOAD A ENVIAR: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
@@ -250,6 +305,8 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                         logger.info(f"📥 Respuesta del servidor: {ghl_response.text}")
                 except Exception as e:
                     logger.error(f"❌ Error enviando webhook GHL: {str(e)}")
+            else:
+                logger.info(f"ℹ️ Cliente envió mensaje sin haber un outbound previo pendiente")
         
         return JSONResponse(content={
             "status": "received",
@@ -258,8 +315,15 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 "contact_id": contact_id,
                 "direction": direction,
                 "message": msg_info["message"],
-                "response_time": response_time_info,
-                "average_time": calculate_average_time(global_client_response_times)
+                "client_response_time": response_time_info,
+                "averages": {
+                    "global": calculate_average(global_total_seconds, global_response_count),
+                    "conversation": calculate_conversation_average(conv["response_times"]) if conv["response_times"] else None,
+                    "client": calculate_average(
+                        client_stats[parsed_body.get("client_id", "unknown")]["total_seconds"],
+                        client_stats[parsed_body.get("client_id", "unknown")]["response_count"]
+                    ) if parsed_body.get("client_id") else None
+                }
             }
         })
     
