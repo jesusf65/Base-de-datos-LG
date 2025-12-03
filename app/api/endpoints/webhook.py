@@ -184,7 +184,7 @@ def calculate_conversation_average(response_times: list) -> Optional[dict]:
 @router.post("/webhook/raw")
 async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_raw_body)):
     global global_total_seconds, global_response_count
-    
+
     try:
         timestamp_received = datetime.now()
         raw_body_text = raw_body.decode('utf-8', errors='ignore')
@@ -194,23 +194,24 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 parsed_body = json.loads(raw_body_text)
         except json.JSONDecodeError:
             parsed_body = {"raw_text": raw_body_text}
-        
+
         logger.info(f"📦 Body recibido: {json.dumps(parsed_body, indent=2, ensure_ascii=False)}")
-        
+
         msg_info = extract_message_info(parsed_body)
         contact_id = msg_info["contact_id"]
         if not contact_id:
             logger.warning("⚠️ Mensaje sin contact_id - ignorado")
             return JSONResponse(content={"status": "ignored", "reason": "no_contact_id"})
-        
+
         conv = conversations[contact_id]
-        if not conv["contact_id"]:
+        if not conv.get("contact_id"):
             conv["contact_id"] = contact_id
             conv["contact_info"] = {"name": msg_info["contact_name"], "phone": msg_info["phone"]}
-        
+            conv["pending_client_messages"] = []  # inicializamos lista de pendientes
+
         direction = msg_info["direction"] or "unknown"
         direction_lower = str(direction).lower()
-        
+
         message_entry = {
             "timestamp_received": timestamp_received.isoformat(),
             "timestamp_received_parsed": timestamp_received,
@@ -220,64 +221,61 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
             "message": msg_info["message"],
             "response_time": None
         }
-        
+
         conv["messages"].append(message_entry)
         response_time_info = None
 
         # INBOUND
         if direction_lower == "inbound":
-            conv["pending_client_message"] = message_entry
+            conv["pending_client_messages"].append(message_entry)
             logger.info(f"📥 MENSAJE INBOUND recibido (cliente → vendedor): {msg_info['message']}")
-            logger.info(f"⏳ Esperando respuesta del vendedor...")
-        
+            logger.info(f"⏳ Mensaje agregado a pendientes... total pendientes: {len(conv['pending_client_messages'])}")
+
         # OUTBOUND
         elif direction_lower == "outbound":
             logger.info(f"📤 MENSAJE OUTBOUND enviado (vendedor → cliente): {msg_info['message']}")
-            
-            if conv["pending_client_message"]:
-                pending = conv["pending_client_message"]
+
+            if conv["pending_client_messages"]:
+                # Tomamos el primer mensaje pendiente (FIFO)
+                pending = conv["pending_client_messages"].pop(0)
                 client_time = pending["timestamp_received_parsed"]
                 vendor_time = timestamp_received
                 response_time_info = calculate_response_time(client_time, vendor_time)
-                
+
                 tiempo_respuesta_minutos = response_time_info["total_seconds"] / 60
-                
                 if tiempo_respuesta_minutos > TIEMPO_MAXIMO_MINUTOS:
                     logger.warning(f"⚠️ RESPUESTA DESCARTADA: {response_time_info['formatted']} excede límite")
-                    conv["pending_client_message"] = None
                     return JSONResponse(content={"status": "ignored", "reason": "response_time_exceeded"})
-                
+
                 logger.info(f"✅ Tiempo de respuesta válido: {response_time_info['formatted']}")
-                
                 message_entry["response_time"] = response_time_info
                 conv["response_times"].append(response_time_info)
-                conv["pending_client_message"] = None
-                
+
                 # Extraer client_id y client_name
-                client_id = parsed_body.get("client_id") or parsed_body.get("clientId") or "unknown"
+                client_id = parsed_body.get("client_id") or parsed_body.get("clientId") or contact_id
                 client_name = parsed_body.get("client_name") or parsed_body.get("clientName") or msg_info.get("contact_name") or "unknown"
-                
+
                 # Promedios
                 global_total_seconds += response_time_info["total_seconds"]
                 global_response_count += 1
                 avg_global = calculate_average(global_total_seconds, global_response_count)
-                
-                avg_conversation = calculate_conversation_average(conv["response_times"])
-                
+
                 client_stats[client_id]["total_seconds"] += response_time_info["total_seconds"]
                 client_stats[client_id]["response_count"] += 1
                 avg_client = calculate_average(client_stats[client_id]["total_seconds"], client_stats[client_id]["response_count"])
-                
+
+                avg_conversation = calculate_conversation_average(conv["response_times"])
+
                 logger.info(f"⏱️ Tiempo de respuesta: {response_time_info['formatted']}")
-                
-                # 🔗 DETERMINAR WEBHOOK POR LOCATION_ID (diccionario)
+
+                # DETERMINAR WEBHOOK POR LOCATION_ID
                 location_id = parsed_body.get("location", {}).get("id", "unknown")
                 webhook_url = LOCATION_WEBHOOKS.get(location_id, WEBHOOK_DEFAULT)
                 if location_id in LOCATION_WEBHOOKS:
                     logger.info(f"🎯 Location_id {location_id} reconocido, usando webhook específico")
                 else:
                     logger.info(f"⚠️ Location_id {location_id} no reconocido, usando webhook por defecto")
-                
+
                 # Payload
                 payload_to_ghl = {
                     "contact_id": str(contact_id),
@@ -297,15 +295,13 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                     "vendor_average_formatted": str(avg_client["formatted"]) if avg_client else "N/A",
                     "vendor_total_responses": client_stats[client_id]["response_count"]
                 }
-                
-                logger.info(f"📤 Payload a enviar: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
 
-                # Log de promedios acumulados
+                logger.info(f"📤 Payload a enviar: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
                 logger.info(f"📊 PROMEDIOS ACUMULADOS:")
                 logger.info(f"   Global: {avg_global['formatted']} ({global_response_count} respuestas)")
                 logger.info(f"   Cliente {client_name}: {avg_client['formatted']} ({client_stats[client_id]['response_count']} respuestas)")
                 logger.info(f"   Conversación: {avg_conversation['formatted']} ({len(conv['response_times'])} respuestas)")
-                
+
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
                         ghl_response = await client.post(webhook_url, json=payload_to_ghl)
@@ -315,9 +311,9 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                     logger.error(f"❌ Error enviando webhook: {str(e)}")
             else:
                 logger.info(f"ℹ️ Mensaje OUTBOUND sin inbound pendiente")
-        
+
         return JSONResponse(content={"status": "received", "timestamp": timestamp_received.isoformat()})
-    
+
     except Exception as e:
         logger.error(f"❌ ERROR: {str(e)}")
         import traceback
