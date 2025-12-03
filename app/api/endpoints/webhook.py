@@ -21,52 +21,32 @@ logger = logging.getLogger("message_tracker")
 router = APIRouter()
 
 # ⚙️ CONFIGURACIÓN: Tiempo máximo permitido (en minutos)
-# Solo se enviarán al webhook las respuestas que estén dentro de este tiempo
-# Ejemplos: 30 (media hora), 60 (1 hora), 120 (2 horas), 300 (5 horas)
-TIEMPO_MAXIMO_MINUTOS = 300
+TIEMPO_MAXIMO_MINUTOS = 1
 
-# 🔗 CONFIGURACIÓN DE SUBCUENTAS (POR LOCATION_ID)
-# Cada subcuenta/ubicación tiene su LOCATION_ID único y su WEBHOOK correspondiente
-
-# Subcuenta 1: 
-LOCATION_ID_LEADGROWTH = "f1nXHhZhhRHOiU74mtmb"
-WEBHOOK_LEADGROWTH = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
-
-# Subcuenta 2: Luxury Motors ejemplo
-LOCATION_ID_LUXURY_MOTORS = "xk92jdLm4pQr8Yz"
-WEBHOOK_LUXURY_MOTORS = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/luxury-motors-456"
-
-# Subcuenta 3: Auto Express Ejemplo
-LOCATION_ID_AUTO_EXPRESS = "vB7nWq3RtY5mKpL"
-WEBHOOK_AUTO_EXPRESS = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/auto-express-789"
-
-# 🔗 Webhook por defecto (si el location_id no coincide con ninguno)
-WEBHOOK_DEFAULT = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
-
-# 📋 Mapeo automático (NO EDITAR - se genera automáticamente)
-WEBHOOKS_POR_LOCATION = {
-    LOCATION_ID_LEADGROWTH: WEBHOOK_LEADGROWTH,
-    LOCATION_ID_LUXURY_MOTORS: WEBHOOK_LUXURY_MOTORS,
-    LOCATION_ID_AUTO_EXPRESS: WEBHOOK_AUTO_EXPRESS,
+# 🌐 Diccionario de webhooks por location_id
+LOCATION_WEBHOOKS = {
+    "ejemploD3location2123": "https://www.ejemplodewebhook.com",  # PREMIUM_CARS
+    # Agrega más subcuentas aquí:
+    # "location_id_otro_cliente": "https://webhook_otro_cliente.com"
 }
 
-# Variables globales para medir cuánto tarda el VENDEDOR en responder al CLIENTE
+WEBHOOK_DEFAULT = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
+
+# Variables globales para promedios
 global_total_seconds = 0.0
 global_response_count = 0
 
-# Promedio por vendedor/cliente
-location_stats = defaultdict(lambda: {
+client_stats = defaultdict(lambda: {
     "total_seconds": 0.0,
     "response_count": 0
 })
 
-# Almacenamiento organizado por conversación
 conversations = defaultdict(lambda: {
     "contact_id": None,
     "contact_info": {},
     "messages": [],
     "response_times": [],
-    "pending_client_message": None  # Mensaje del cliente esperando respuesta del vendedor
+    "pending_client_message": None
 })
 
 async def get_raw_body(request: Request):
@@ -92,25 +72,16 @@ def parse_timestamp(ts_value) -> Optional[datetime]:
             continue
     return None
 
-def search_nested_value(data, search_keys):
-    if not isinstance(data, dict):
-        return None
-
+def search_nested_value(data: dict, search_keys: list):
     for key in search_keys:
-        try:
-            if key in data and data[key]:
-                return data[key]
-        except TypeError:
-            continue
-
+        if key in data and data[key]:
+            return data[key]
     for key, value in data.items():
         if isinstance(value, dict):
             result = search_nested_value(value, search_keys)
             if result:
                 return result
-
     return None
-
 
 def extract_message_info(data: dict) -> dict:
     message_info = {
@@ -121,7 +92,6 @@ def extract_message_info(data: dict) -> dict:
         "direction": None,
         "contact_name": None,
         "phone": None,
-        "location_id": None,
         "raw_data": data
     }
     
@@ -138,10 +108,6 @@ def extract_message_info(data: dict) -> dict:
     
     direction_fields = ['direction', 'type', 'messageType', 'messageDirection', 'messageStatus']
     message_info["direction"] = search_nested_value(data, direction_fields)
-    
-    # Extraer location_id
-    location_fields = ['locationId', 'location_id', 'location']
-    message_info["location_id"] = search_nested_value(data, location_fields)
     
     if not message_info["direction"]:
         if 'Mensajes del cliente' in data:
@@ -186,10 +152,8 @@ def calculate_response_time(start: datetime, end: datetime) -> dict:
     }
 
 def calculate_average(total_seconds: float, count: int) -> Optional[dict]:
-    """Calcula el promedio: suma_total / cantidad"""
     if count == 0:
         return None
-    
     avg_seconds = total_seconds / count
     hours = int(avg_seconds // 3600)
     minutes = int((avg_seconds % 3600) // 60)
@@ -212,7 +176,6 @@ def calculate_average(total_seconds: float, count: int) -> Optional[dict]:
     }
 
 def calculate_conversation_average(response_times: list) -> Optional[dict]:
-    """Calcula el promedio de UNA conversación específica"""
     if not response_times:
         return None
     total = sum(rt["total_seconds"] for rt in response_times)
@@ -261,145 +224,93 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
         conv["messages"].append(message_entry)
         response_time_info = None
 
-        # INBOUND = Cliente envía mensaje al vendedor
+        # INBOUND
         if direction_lower == "inbound":
             conv["pending_client_message"] = message_entry
             logger.info(f"📥 MENSAJE INBOUND recibido (cliente → vendedor): {msg_info['message']}")
             logger.info(f"⏳ Esperando respuesta del vendedor...")
         
-        # OUTBOUND = Vendedor responde al cliente
+        # OUTBOUND
         elif direction_lower == "outbound":
             logger.info(f"📤 MENSAJE OUTBOUND enviado (vendedor → cliente): {msg_info['message']}")
             
-            # Si hay un mensaje pendiente del cliente, calculamos cuánto tardó el vendedor en responder
             if conv["pending_client_message"]:
                 pending = conv["pending_client_message"]
-                client_time = pending["timestamp_received_parsed"]  # Cuando el cliente envió
-                vendor_time = timestamp_received  # Cuando el vendedor respondió
+                client_time = pending["timestamp_received_parsed"]
+                vendor_time = timestamp_received
                 response_time_info = calculate_response_time(client_time, vendor_time)
                 
-                # 🔍 FILTRO: Verificar si el tiempo de respuesta está dentro del límite permitido
                 tiempo_respuesta_minutos = response_time_info["total_seconds"] / 60
                 
                 if tiempo_respuesta_minutos > TIEMPO_MAXIMO_MINUTOS:
-                    logger.warning(f"⚠️ RESPUESTA DESCARTADA: {response_time_info['formatted']} ({tiempo_respuesta_minutos:.1f} min) excede el límite de {TIEMPO_MAXIMO_MINUTOS} minutos")
-                    conv["pending_client_message"] = None  # Limpiar mensaje pendiente
-                    
-                    return JSONResponse(content={
-                        "status": "ignored",
-                        "reason": "response_time_exceeded",
-                        "response_time_minutes": tiempo_respuesta_minutos,
-                        "max_allowed_minutes": TIEMPO_MAXIMO_MINUTOS,
-                        "message": f"Tiempo de respuesta {response_time_info['formatted']} excede el límite de {TIEMPO_MAXIMO_MINUTOS} minutos"
-                    })
+                    logger.warning(f"⚠️ RESPUESTA DESCARTADA: {response_time_info['formatted']} excede límite")
+                    conv["pending_client_message"] = None
+                    return JSONResponse(content={"status": "ignored", "reason": "response_time_exceeded"})
                 
-                # ✅ El tiempo está dentro del límite, continuar normalmente
-                logger.info(f"✅ Tiempo de respuesta válido: {response_time_info['formatted']} ({tiempo_respuesta_minutos:.1f} min)")
+                logger.info(f"✅ Tiempo de respuesta válido: {response_time_info['formatted']}")
                 
                 message_entry["response_time"] = response_time_info
                 conv["response_times"].append(response_time_info)
                 conv["pending_client_message"] = None
                 
-                # Extraer location_id y datos del cliente
-                location_id = msg_info.get("location_id") or parsed_body.get("location_id") or parsed_body.get("locationId") or "unknown"
-                location_id = str(location_id) if location_id and not isinstance(location_id, dict) else "unknown"
+                # Extraer client_id y client_name
                 client_id = parsed_body.get("client_id") or parsed_body.get("clientId") or "unknown"
                 client_name = parsed_body.get("client_name") or parsed_body.get("clientName") or msg_info.get("contact_name") or "unknown"
                 
-                # ACTUALIZAR LOS 3 PROMEDIOS:
-                
-                # 1️⃣ PROMEDIO GLOBAL (todos los chats)
+                # Promedios
                 global_total_seconds += response_time_info["total_seconds"]
                 global_response_count += 1
                 avg_global = calculate_average(global_total_seconds, global_response_count)
                 
-                # 2️⃣ PROMEDIO DE ESTA CONVERSACIÓN (solo este contact_id)
                 avg_conversation = calculate_conversation_average(conv["response_times"])
                 
-                # 3️⃣ PROMEDIO POR LOCATION (todos los chats de este location_id)
-                location_stats[location_id]["total_seconds"] += response_time_info["total_seconds"]
-                location_stats[location_id]["response_count"] += 1
-                avg_location = calculate_average(
-                    location_stats[location_id]["total_seconds"],
-                    location_stats[location_id]["response_count"]
-                )
+                client_stats[client_id]["total_seconds"] += response_time_info["total_seconds"]
+                client_stats[client_id]["response_count"] += 1
+                avg_client = calculate_average(client_stats[client_id]["total_seconds"], client_stats[client_id]["response_count"])
                 
-                # LOGS DETALLADOS
-                logger.info(f"⏱️ El VENDEDOR tardó en responder: {response_time_info['formatted']}")
-                logger.info(f"📊 PROMEDIO GLOBAL (todos los chats): {avg_global['formatted'] if avg_global else 'N/A'}")
-                logger.info(f"💬 PROMEDIO DE ESTA CONVERSACIÓN: {avg_conversation['formatted'] if avg_conversation else 'N/A'}")
-                logger.info(f"📍 PROMEDIO DE LOCATION {location_id}: {avg_location['formatted'] if avg_location else 'N/A'}")
+                logger.info(f"⏱️ Tiempo de respuesta: {response_time_info['formatted']}")
                 
-                # 🔗 Seleccionar el webhook correcto según el location_id
-                webhook_url = WEBHOOKS_POR_LOCATION.get(location_id, WEBHOOK_DEFAULT)
-                
-                if location_id in WEBHOOKS_POR_LOCATION:
-                    logger.info(f"🎯 Usando webhook específico para location_id '{location_id}'")
+                # 🔗 DETERMINAR WEBHOOK POR LOCATION_ID (diccionario)
+                location_id = parsed_body.get("location", {}).get("id", "unknown")
+                webhook_url = LOCATION_WEBHOOKS.get(location_id, WEBHOOK_DEFAULT)
+                if location_id in LOCATION_WEBHOOKS:
+                    logger.info(f"🎯 Location_id {location_id} reconocido, usando webhook específico")
                 else:
-                    logger.info(f"⚠️ Location_id '{location_id}' no encontrado, usando webhook por defecto")
+                    logger.info(f"⚠️ Location_id {location_id} no reconocido, usando webhook por defecto")
                 
-                logger.info(f"🔗 Webhook destino: {webhook_url}")
-                
-                # Enviar payload al webhook correspondiente
-                
+                # Payload
                 payload_to_ghl = {
                     "contact_id": str(contact_id),
-                    "location_id": str(location_id),
                     "client_id": str(client_id),
                     "client_name": str(client_name),
                     "outbound_message": str(message_entry["message"]) if message_entry["message"] else "",
                     "timestamp": timestamp_received.isoformat(),
-                    
-                    # ⭐ TIEMPO DE ESTA RESPUESTA ESPECÍFICA (en segundos)
                     "response_time_seconds": float(response_time_info["total_seconds"]),
                     "response_time_formatted": str(response_time_info["formatted"]),
-                    
-                    # ⭐ PROMEDIO SOLO DE ESTA CONVERSACIÓN (en segundos)
                     "conversation_average_seconds": float(avg_conversation["total_seconds"]) if avg_conversation else 0.0,
                     "conversation_average_formatted": str(avg_conversation["formatted"]) if avg_conversation else "N/A",
                     "conversation_total_responses": len(conv["response_times"]),
-                    
-                    # PROMEDIO GLOBAL (todos los chats juntos)
                     "global_average_seconds": float(avg_global["total_seconds"]) if avg_global else 0.0,
                     "global_average_formatted": str(avg_global["formatted"]) if avg_global else "N/A",
                     "global_total_responses": global_response_count,
-                    
-                    # PROMEDIO DE ESTA LOCATION (todos los chats de este location_id)
-                    "location_average_seconds": float(avg_location["total_seconds"]) if avg_location else 0.0,
-                    "location_average_formatted": str(avg_location["formatted"]) if avg_location else "N/A",
-                    "location_total_responses": location_stats[location_id]["response_count"]
+                    "vendor_average_seconds": float(avg_client["total_seconds"]) if avg_client else 0.0,
+                    "vendor_average_formatted": str(avg_client["formatted"]) if avg_client else "N/A",
+                    "vendor_total_responses": client_stats[client_id]["response_count"]
                 }
                 
-                logger.info(f"📤 PAYLOAD A ENVIAR: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
+                logger.info(f"📤 Payload a enviar: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
                 
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
                         ghl_response = await client.post(webhook_url, json=payload_to_ghl)
-                        logger.info(f"✅ Webhook enviado a {webhook_url} - Status: {ghl_response.status_code}")
-                        logger.info(f"📥 Respuesta del servidor: {ghl_response.text}")
+                        logger.info(f"✅ Webhook enviado - Status: {ghl_response.status_code}")
+                        logger.info(f"📥 Respuesta: {ghl_response.text}")
                 except Exception as e:
-                    logger.error(f"❌ Error enviando webhook GHL: {str(e)}")
+                    logger.error(f"❌ Error enviando webhook: {str(e)}")
             else:
-                logger.info(f"ℹ️ Vendedor envió mensaje sin haber un inbound previo pendiente")
+                logger.info(f"ℹ️ Mensaje OUTBOUND sin inbound pendiente")
         
-        return JSONResponse(content={
-            "status": "received",
-            "timestamp": timestamp_received.isoformat(),
-            "data": {
-                "contact_id": contact_id,
-                "direction": direction,
-                "message": msg_info["message"],
-                "vendor_response_time": response_time_info,
-                "averages": {
-                    "global": calculate_average(global_total_seconds, global_response_count),
-                    "conversation": calculate_conversation_average(conv["response_times"]) if conv["response_times"] else None,
-                    "location": calculate_average(
-                        location_stats[msg_info.get("location_id", "unknown")]["total_seconds"],
-                        location_stats[msg_info.get("location_id", "unknown")]["response_count"]
-                    ) if msg_info.get("location_id") else None
-                }
-            }
-        })
+        return JSONResponse(content={"status": "received", "timestamp": timestamp_received.isoformat()})
     
     except Exception as e:
         logger.error(f"❌ ERROR: {str(e)}")
