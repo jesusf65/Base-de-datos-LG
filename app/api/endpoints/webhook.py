@@ -21,7 +21,7 @@ logger = logging.getLogger("message_tracker")
 router = APIRouter()
 
 # CONFIGURACIÓN: Tiempo máximo permitido (en minutos)
-TIEMPO_MAXIMO_MINUTOS = 1
+TIEMPO_MAXIMO_MINUTOS = 300
 
 # Diccionario de webhooks por location_id
 LOCATION_WEBHOOKS = {
