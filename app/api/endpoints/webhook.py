@@ -302,6 +302,7 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 
                 # Extraer location_id y datos del cliente
                 location_id = msg_info.get("location_id") or parsed_body.get("location_id") or parsed_body.get("locationId") or "unknown"
+                location_id = str(location_id) if location_id and not isinstance(location_id, dict) else "unknown"
                 client_id = parsed_body.get("client_id") or parsed_body.get("clientId") or "unknown"
                 client_name = parsed_body.get("client_name") or parsed_body.get("clientName") or msg_info.get("contact_name") or "unknown"
                 
