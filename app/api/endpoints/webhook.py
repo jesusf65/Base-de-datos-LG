@@ -23,14 +23,39 @@ router = APIRouter()
 # ⚙️ CONFIGURACIÓN: Tiempo máximo permitido (en minutos)
 # Solo se enviarán al webhook las respuestas que estén dentro de este tiempo
 # Ejemplos: 30 (media hora), 60 (1 hora), 120 (2 horas), 300 (5 horas)
-TIEMPO_MAXIMO_MINUTOS = 1
+TIEMPO_MAXIMO_MINUTOS = 300
+
+# 🔗 CONFIGURACIÓN DE SUBCUENTAS (POR LOCATION_ID)
+# Cada subcuenta/ubicación tiene su LOCATION_ID único y su WEBHOOK correspondiente
+
+# Subcuenta 1: 
+LOCATION_ID_LEADGROWTH = "dsidjsdi2oewDs3"
+WEBHOOK_LEADGROWTH = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
+
+# Subcuenta 2: Luxury Motors ejemplo
+LOCATION_ID_LUXURY_MOTORS = "xk92jdLm4pQr8Yz"
+WEBHOOK_LUXURY_MOTORS = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/luxury-motors-456"
+
+# Subcuenta 3: Auto Express Ejemplo
+LOCATION_ID_AUTO_EXPRESS = "vB7nWq3RtY5mKpL"
+WEBHOOK_AUTO_EXPRESS = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/auto-express-789"
+
+# 🔗 Webhook por defecto (si el location_id no coincide con ninguno)
+WEBHOOK_DEFAULT = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
+
+# 📋 Mapeo automático (NO EDITAR - se genera automáticamente)
+WEBHOOKS_POR_LOCATION = {
+    LOCATION_ID_LEADGROWTH: WEBHOOK_LEADGROWTH,
+    LOCATION_ID_LUXURY_MOTORS: WEBHOOK_LUXURY_MOTORS,
+    LOCATION_ID_AUTO_EXPRESS: WEBHOOK_AUTO_EXPRESS,
+}
 
 # Variables globales para medir cuánto tarda el VENDEDOR en responder al CLIENTE
 global_total_seconds = 0.0
 global_response_count = 0
 
 # Promedio por vendedor/cliente
-client_stats = defaultdict(lambda: {
+location_stats = defaultdict(lambda: {
     "total_seconds": 0.0,
     "response_count": 0
 })
@@ -87,6 +112,7 @@ def extract_message_info(data: dict) -> dict:
         "direction": None,
         "contact_name": None,
         "phone": None,
+        "location_id": None,
         "raw_data": data
     }
     
@@ -103,6 +129,10 @@ def extract_message_info(data: dict) -> dict:
     
     direction_fields = ['direction', 'type', 'messageType', 'messageDirection', 'messageStatus']
     message_info["direction"] = search_nested_value(data, direction_fields)
+    
+    # Extraer location_id
+    location_fields = ['locationId', 'location_id', 'location']
+    message_info["location_id"] = search_nested_value(data, location_fields)
     
     if not message_info["direction"]:
         if 'Mensajes del cliente' in data:
@@ -261,7 +291,8 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 conv["response_times"].append(response_time_info)
                 conv["pending_client_message"] = None
                 
-                # Extraer client_id
+                # Extraer location_id y datos del cliente
+                location_id = msg_info.get("location_id") or parsed_body.get("location_id") or parsed_body.get("locationId") or "unknown"
                 client_id = parsed_body.get("client_id") or parsed_body.get("clientId") or "unknown"
                 client_name = parsed_body.get("client_name") or parsed_body.get("clientName") or msg_info.get("contact_name") or "unknown"
                 
@@ -275,25 +306,35 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 # 2️⃣ PROMEDIO DE ESTA CONVERSACIÓN (solo este contact_id)
                 avg_conversation = calculate_conversation_average(conv["response_times"])
                 
-                # 3️⃣ PROMEDIO POR VENDEDOR/CLIENTE (todos los chats de este client_id)
-                client_stats[client_id]["total_seconds"] += response_time_info["total_seconds"]
-                client_stats[client_id]["response_count"] += 1
-                avg_client = calculate_average(
-                    client_stats[client_id]["total_seconds"],
-                    client_stats[client_id]["response_count"]
+                # 3️⃣ PROMEDIO POR LOCATION (todos los chats de este location_id)
+                location_stats[location_id]["total_seconds"] += response_time_info["total_seconds"]
+                location_stats[location_id]["response_count"] += 1
+                avg_location = calculate_average(
+                    location_stats[location_id]["total_seconds"],
+                    location_stats[location_id]["response_count"]
                 )
                 
                 # LOGS DETALLADOS
                 logger.info(f"⏱️ El VENDEDOR tardó en responder: {response_time_info['formatted']}")
                 logger.info(f"📊 PROMEDIO GLOBAL (todos los chats): {avg_global['formatted'] if avg_global else 'N/A'}")
                 logger.info(f"💬 PROMEDIO DE ESTA CONVERSACIÓN: {avg_conversation['formatted'] if avg_conversation else 'N/A'}")
-                logger.info(f"👤 PROMEDIO DEL VENDEDOR {client_id}: {avg_client['formatted'] if avg_client else 'N/A'}")
+                logger.info(f"📍 PROMEDIO DE LOCATION {location_id}: {avg_location['formatted'] if avg_location else 'N/A'}")
                 
-                # Enviar payload al webhook de GHL
-                ghl_webhook_url = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
+                # 🔗 Seleccionar el webhook correcto según el location_id
+                webhook_url = WEBHOOKS_POR_LOCATION.get(location_id, WEBHOOK_DEFAULT)
+                
+                if location_id in WEBHOOKS_POR_LOCATION:
+                    logger.info(f"🎯 Usando webhook específico para location_id '{location_id}'")
+                else:
+                    logger.info(f"⚠️ Location_id '{location_id}' no encontrado, usando webhook por defecto")
+                
+                logger.info(f"🔗 Webhook destino: {webhook_url}")
+                
+                # Enviar payload al webhook correspondiente
                 
                 payload_to_ghl = {
                     "contact_id": str(contact_id),
+                    "location_id": str(location_id),
                     "client_id": str(client_id),
                     "client_name": str(client_name),
                     "outbound_message": str(message_entry["message"]) if message_entry["message"] else "",
@@ -313,18 +354,18 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                     "global_average_formatted": str(avg_global["formatted"]) if avg_global else "N/A",
                     "global_total_responses": global_response_count,
                     
-                    # PROMEDIO DEL VENDEDOR (todos los chats de este vendedor/client_id)
-                    "vendor_average_seconds": float(avg_client["total_seconds"]) if avg_client else 0.0,
-                    "vendor_average_formatted": str(avg_client["formatted"]) if avg_client else "N/A",
-                    "vendor_total_responses": client_stats[client_id]["response_count"]
+                    # PROMEDIO DE ESTA LOCATION (todos los chats de este location_id)
+                    "location_average_seconds": float(avg_location["total_seconds"]) if avg_location else 0.0,
+                    "location_average_formatted": str(avg_location["formatted"]) if avg_location else "N/A",
+                    "location_total_responses": location_stats[location_id]["response_count"]
                 }
                 
                 logger.info(f"📤 PAYLOAD A ENVIAR: {json.dumps(payload_to_ghl, indent=2, ensure_ascii=False)}")
                 
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
-                        ghl_response = await client.post(ghl_webhook_url, json=payload_to_ghl)
-                        logger.info(f"✅ Webhook GHL enviado - Status: {ghl_response.status_code}")
+                        ghl_response = await client.post(webhook_url, json=payload_to_ghl)
+                        logger.info(f"✅ Webhook enviado a {webhook_url} - Status: {ghl_response.status_code}")
                         logger.info(f"📥 Respuesta del servidor: {ghl_response.text}")
                 except Exception as e:
                     logger.error(f"❌ Error enviando webhook GHL: {str(e)}")
@@ -342,10 +383,10 @@ async def receive_raw_webhook(request: Request, raw_body: bytes = Depends(get_ra
                 "averages": {
                     "global": calculate_average(global_total_seconds, global_response_count),
                     "conversation": calculate_conversation_average(conv["response_times"]) if conv["response_times"] else None,
-                    "vendor": calculate_average(
-                        client_stats[parsed_body.get("client_id", "unknown")]["total_seconds"],
-                        client_stats[parsed_body.get("client_id", "unknown")]["response_count"]
-                    ) if parsed_body.get("client_id") else None
+                    "location": calculate_average(
+                        location_stats[msg_info.get("location_id", "unknown")]["total_seconds"],
+                        location_stats[msg_info.get("location_id", "unknown")]["response_count"]
+                    ) if msg_info.get("location_id") else None
                 }
             }
         })
