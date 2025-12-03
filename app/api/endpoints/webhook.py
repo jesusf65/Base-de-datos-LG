@@ -20,12 +20,12 @@ logger = logging.getLogger("message_tracker")
 
 router = APIRouter()
 
-# ⚙️ CONFIGURACIÓN: Tiempo máximo permitido (en minutos)
+#  CONFIGURACIÓN: Tiempo máximo permitido (en minutos)
 TIEMPO_MAXIMO_MINUTOS = 1
 
-# 🌐 Diccionario de webhooks por location_id
+#  Diccionario de webhooks por location_id
 LOCATION_WEBHOOKS = {
-    "ejemploD3location2123": "https://www.ejemplodewebhook.com",  # PREMIUM_CARS
+    "f1nXHhZhhRHOiU74mtmb": "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88",  # LEADGROWTH
     # Agrega más subcuentas aquí:
     # "location_id_otro_cliente": "https://webhook_otro_cliente.com"
 }
