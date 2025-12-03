@@ -29,7 +29,7 @@ TIEMPO_MAXIMO_MINUTOS = 300
 # Cada subcuenta/ubicación tiene su LOCATION_ID único y su WEBHOOK correspondiente
 
 # Subcuenta 1: 
-LOCATION_ID_LEADGROWTH = "dsidjsdi2oewDs3"
+LOCATION_ID_LEADGROWTH = "f1nXHhZhhRHOiU74mtmb"
 WEBHOOK_LEADGROWTH = "https://services.leadconnectorhq.com/hooks/f1nXHhZhhRHOiU74mtmb/webhook-trigger/d1138875-719d-4350-92d1-be289146ee88"
 
 # Subcuenta 2: Luxury Motors ejemplo
@@ -92,16 +92,25 @@ def parse_timestamp(ts_value) -> Optional[datetime]:
             continue
     return None
 
-def search_nested_value(data: dict, search_keys: list):
+def search_nested_value(data, search_keys):
+    if not isinstance(data, dict):
+        return None
+
     for key in search_keys:
-        if key in data and data[key]:
-            return data[key]
+        try:
+            if key in data and data[key]:
+                return data[key]
+        except TypeError:
+            continue
+
     for key, value in data.items():
         if isinstance(value, dict):
             result = search_nested_value(value, search_keys)
             if result:
                 return result
+
     return None
+
 
 def extract_message_info(data: dict) -> dict:
     message_info = {
